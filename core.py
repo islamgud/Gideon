@@ -1,226 +1,192 @@
-"""
-core.py — управляющее ядро GIDEON
-
-Состояния:
-    sleep   — спит, не реагирует
-    idle    — готов, ждёт
-    listen  — слушает пользователя
-    think   — обрабатывает запрос
-    speak   — говорит (TTS)
-
-Поток: idle → listen → think → speak → idle
-"""
-
+import json
 import asyncio
+import subprocess
+import platform
 import logging
-from memory import Memory
+from openai import AsyncOpenAI
 
 logger = logging.getLogger("gideon.core")
 
+_openai = AsyncOpenAI()
 
-# ── Таблица интентов (ключевые слова, русский) ────────────────
-INTENT_MAP = {
-    "wake":          ["гидеон", "gideon", "эй гидеон", "hey gideon"],
-    "sleep":         ["спать", "выключись", "пока", "sleep", "bye", "отдыхай"],
-    "think":         ["подумай", "думай", "анализируй", "посчитай", "think", "analyze"],
-    "listen":        ["слушай", "слушаю", "начинай", "listen"],
-    "stop":          ["стоп", "хватит", "отмена", "stop", "cancel", "тихо"],
-    "status":        ["статус", "как дела", "что делаешь", "status"],
-    "memory_save":   ["запомни", "сохрани", "remember"],
-    "memory_load":   ["вспомни", "что знаешь", "recall", "память"],
-    "memory_clear":  ["забудь", "очисти память", "forget"],
+_OS = platform.system()
+
+ALLOWED_APPS: dict[str, list[str]] = {
+    "browser": {
+        "Windows": ["cmd", "/c", "start", "chrome"],
+        "Darwin":  ["open", "-a", "Google Chrome"],
+        "Linux":   ["xdg-open", "https://google.com"],
+    }.get(_OS, []),
+
+    "notepad": {
+        "Windows": ["notepad"],
+        "Darwin":  ["open", "-a", "TextEdit"],
+        "Linux":   ["gedit"],
+    }.get(_OS, []),
+
+    "terminal": {
+        "Windows": ["cmd", "/c", "start", "cmd"],
+        "Darwin":  ["open", "-a", "Terminal"],
+        "Linux":   ["x-terminal-emulator"],
+    }.get(_OS, []),
 }
 
-# Какое состояние устанавливает каждый интент (None = не меняет)
-TRANSITIONS = {
-    "wake":         "idle",
-    "sleep":        "sleep",
-    "think":        "think",
-    "listen":       "listen",
-    "stop":         "idle",
-    "status":       None,
-    "memory_save":  None,
-    "memory_load":  None,
-    "memory_clear": None,
+VALID_INTENTS = {
+    "wake", "sleep", "idle", "listen", "think",
+    "open_app", "memory_set", "memory_get", "status", "unknown"
 }
 
-# Голосовые ответы GIDEON
-VOICE_RESPONSES = {
-    "wake":         "Здесь. Слушаю.",
-    "sleep":        "Ухожу в режим ожидания.",
-    "think":        "Анализирую.",
-    "listen":       "Говорите.",
-    "stop":         "Принято.",
-    "memory_clear": "Память очищена.",
-    "unknown":      "Не понял команду.",
+STATE_INTENTS = {"wake", "sleep", "idle", "listen", "think"}
+
+_INTENT_RESPONSES = {
+    "wake":   "Я слушаю",
+    "sleep":  "Ухожу в сон",
+    "idle":   "На паузе",
+    "listen": "Слушаю внимательно",
+    "think":  "Думаю...",
 }
+
+_SYSTEM_PROMPT = """
+Ты — парсер команд для голосового ассистента GIDEON.
+Преобразуй команду пользователя в JSON-объект.
+
+Доступные intent-ы:
+  wake         — пользователь будит ассистента
+  sleep        — перевести в спящий режим
+  idle         — поставить на паузу
+  listen       — режим прослушивания
+  think        — режим обдумывания
+  open_app     — открыть приложение (params: {"app": "browser"|"notepad"|"terminal"})
+  memory_set   — запомнить значение (params: {"key": "...", "value": "..."})
+  memory_get   — показать память
+  status       — запросить текущее состояние
+  unknown      — если команда непонятна
+
+Отвечай ТОЛЬКО валидным JSON, без markdown-блоков, без пояснений.
+Пример: {"intent": "open_app", "params": {"app": "browser"}}
+""".strip()
 
 
 class GideonCore:
-    def __init__(self, broadcast_fn=None, tts_enabled: bool = True):
-        self.state: str   = "idle"
-        self.memory       = Memory()
-        self._broadcast   = broadcast_fn
-        self._tts_enabled = tts_enabled
-        self._lock        = asyncio.Lock()
-        logger.info("GideonCore инициализирован. Состояние: %s", self.state)
 
-    def set_broadcast(self, fn) -> None:
-        self._broadcast = fn
+    def __init__(self):
+        self.state     = "idle"
+        self.memory    = {}
+        self._broadcast = None
+        self._tts      = True
 
-    def set_tts(self, enabled: bool) -> None:
-        self._tts_enabled = enabled
-
-    # ══════════════════════════════════════════════════════════
-    #  ГЛАВНЫЙ МЕТОД
-    # ══════════════════════════════════════════════════════════
-    async def process_command(self, text: str) -> dict:
-        """Принять команду → интент → состояние → TTS → фронтенд."""
-        async with self._lock:
-            text = text.strip()
-            if not text:
-                return {"ok": False, "reason": "empty"}
-
-            logger.info("Команда: %r  |  Состояние: %s", text, self.state)
-            intent = self._detect_intent(text)
-            logger.info("Интент: %s", intent)
-            return await self._handle_intent(intent, text)
-
-    # ══════════════════════════════════════════════════════════
-    #  ОПРЕДЕЛЕНИЕ ИНТЕНТА
-    # ══════════════════════════════════════════════════════════
-    def _detect_intent(self, text: str) -> str:
-        """
-        Keyword-матчинг с приоритетом длины.
-        Более длинное совпавшее слово = более специфичный интент.
-        """
-        lower = text.lower()
-        best_intent, best_len = "unknown", 0
-        for intent, keywords in INTENT_MAP.items():
-            for kw in keywords:
-                if kw in lower and len(kw) > best_len:
-                    best_intent = intent
-                    best_len    = len(kw)
-        return best_intent
-
-    # ══════════════════════════════════════════════════════════
-    #  ОБРАБОТКА ИНТЕНТОВ
-    # ══════════════════════════════════════════════════════════
-    async def _handle_intent(self, intent: str, text: str) -> dict:
-        # Спим — реагируем только на wake
-        if self.state == "sleep" and intent != "wake":
-            return {"ok": False, "reason": "sleeping", "intent": intent}
-
-        # ── Специальные команды ───────────────────────────────
-        if intent == "memory_save":
-            return await self._cmd_memory_save(text)
-
-        if intent == "memory_load":
-            entries = self.memory.all()
-            await self._say(self._format_memory(entries))
-            return {"ok": True, "intent": intent, "memory": entries}
-
-        if intent == "memory_clear":
-            self.memory.clear()
-            await self._say(VOICE_RESPONSES["memory_clear"])
-            return {"ok": True, "intent": intent}
-
-        if intent == "status":
-            await self._say(f"Состояние: {self.state}. Все системы в норме.")
-            return {"ok": True, "intent": intent, "state": self.state}
-
-        # ── Переход состояния ─────────────────────────────────
-        new_state = TRANSITIONS.get(intent)
-
-        if intent == "unknown":
-            if self.state in ("idle", "listen"):
-                # Неизвестная фраза в активном состоянии → think
-                new_state = "think"
-                intent    = "think"
-            else:
-                await self._say(VOICE_RESPONSES["unknown"])
-                return {"ok": False, "reason": "unknown intent", "state": self.state}
-
-        if new_state and new_state != self.state:
-            await self._set_state(new_state)
-
-        # Голосовой ответ на переход
-        reply = VOICE_RESPONSES.get(intent)
-        if reply:
-            await self._say(reply)
-
-        return {"ok": True, "intent": intent, "state": self.state}
-
-    # ── "запомни X = Y" ───────────────────────────────────────
-    async def _cmd_memory_save(self, text: str) -> dict:
-        for sep in ("=", " это ", " is "):
-            if sep in text.lower():
-                parts = text.lower().split(sep, 1)
-                key   = parts[0]
-                for kw in ("запомни", "сохрани", "remember"):
-                    key = key.replace(kw, "").strip()
-                value = parts[1].strip()
-                self.memory.save(key, value)
-                await self._say(f"Запомнил: {key} — {value}.")
-                return {"ok": True, "intent": "memory_save", "key": key, "value": value}
-
-        await self._say("Не понял что запомнить. Скажите: запомни ключ равно значение.")
-        return {"ok": False, "reason": "parse error", "intent": "memory_save"}
-
-    def _format_memory(self, entries: dict) -> str:
-        parts = [f"{k}: {v}" for k, v in entries.items() if not k.startswith("last_")]
-        return ("Я помню: " + ". ".join(parts) + ".") if parts else "Память пуста."
-
-    # ══════════════════════════════════════════════════════════
-    #  УПРАВЛЕНИЕ СОСТОЯНИЕМ
-    # ══════════════════════════════════════════════════════════
-    async def _set_state(self, new_state: str) -> None:
-        old = self.state
-        self.state = new_state
-        logger.info("Состояние: %s → %s", old, new_state)
-        self.memory.save("last_state", new_state)
-        await self._notify_frontend(new_state)
-
-    async def _notify_frontend(self, state: str) -> None:
-        if self._broadcast is None:
-            return
-        import json
-        payload = json.dumps({"state": state})
-        await self._broadcast(payload)
-        logger.info("→ Frontend: %s", state)
-
-    # ══════════════════════════════════════════════════════════
-    #  TTS — произнести текст голосом GIDEON
-    # ══════════════════════════════════════════════════════════
-    async def _say(self, text: str | None) -> None:
-        """
-        Произнести текст:
-        1. Переключить фронтенд в speak
-        2. Дождаться конца воспроизведения
-        3. Вернуть фронтенд в idle
-        """
-        if not text or not self._tts_enabled:
-            return
-
-        await self._notify_frontend("speak")
-        try:
-            from voice import speak
-            await speak(text)
-        except Exception as e:
-            logger.error("TTS ошибка: %s", e)
-        finally:
-            # Возврат в текущее состояние (не всегда idle)
-            await self._notify_frontend(self.state)
-
-    # ══════════════════════════════════════════════════════════
-    #  УТИЛИТЫ
-    # ══════════════════════════════════════════════════════════
     def get_state(self) -> str:
         return self.state
 
-    def status(self) -> dict:
-        return {
-            "state":       self.state,
-            "tts":         self._tts_enabled,
-            "memory_keys": list(self.memory.all().keys()),
-        }
+    def set_broadcast(self, fn):
+        self._broadcast = fn
+
+    def set_tts(self, enabled: bool):
+        self._tts = enabled
+
+    # ══════════════════════════════════════════════════════════
+    #  State
+    # ══════════════════════════════════════════════════════════
+    def _update_state(self, intent: str):
+        if intent in STATE_INTENTS:
+            self.state = intent
+
+    # ══════════════════════════════════════════════════════════
+    #  LLM
+    # ══════════════════════════════════════════════════════════
+    async def understand(self, text: str) -> dict:
+        response = await asyncio.wait_for(
+            _openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user",   "content": text},
+                ],
+                temperature=0,
+                max_tokens=150,
+                response_format={"type": "json_object"},
+            ),
+            timeout=10,
+        )
+
+        return json.loads(response.choices[0].message.content)
+
+    # ══════════════════════════════════════════════════════════
+    #  Обработка команды
+    # ══════════════════════════════════════════════════════════
+    async def process_command(self, text: str) -> dict:
+        try:
+            parsed = await self.understand(text)
+        except asyncio.TimeoutError:
+            logger.error("understand() timeout")
+            return {"state": self.state, "response": "LLM не ответил вовремя"}
+        except Exception as e:
+            logger.error("understand() failed: %s", e)
+            return {"state": self.state, "response": "Ошибка анализа команды"}
+
+        if "intent" not in parsed:
+            logger.warning("LLM не вернул intent: %r", parsed)
+            return {"state": self.state, "response": "Не понял команду"}
+
+        intent = parsed.get("intent", "unknown")
+
+        if intent not in VALID_INTENTS:
+            logger.warning("Неизвестный intent от LLM: %r", intent)
+            intent = "unknown"
+
+        params = parsed.get("params", {})
+        logger.info("intent=%r params=%r", intent, params)
+
+        # до любых side effects
+        if intent == "status":
+            return {"state": self.state}
+
+        # unknown не трогает state pipeline
+        if intent != "unknown":
+            self._update_state(intent)
+
+        match intent:
+            case "unknown":
+                return {"state": self.state, "response": "Не понял команду"}
+            case "open_app":
+                return await self._handle_open_app(params)
+            case "memory_set":
+                return self._handle_memory_set(params)
+            case "memory_get":
+                return {"state": self.state, "memory": self.memory}
+
+        # wake / sleep / idle / listen / think
+        result = {"state": self.state}
+        response = _INTENT_RESPONSES.get(intent)
+        if response:
+            result["response"] = response
+        return result
+
+    # ══════════════════════════════════════════════════════════
+    #  Хэндлеры
+    # ══════════════════════════════════════════════════════════
+    async def _handle_open_app(self, params: dict) -> dict:
+        app = params.get("app", "").lower()
+
+        if app not in ALLOWED_APPS or not ALLOWED_APPS[app]:
+            return {"state": self.state, "error": f"Приложение '{app}' не разрешено"}
+
+        try:
+            subprocess.Popen(ALLOWED_APPS[app], shell=False)
+        except FileNotFoundError:
+            return {"state": self.state, "error": f"Не найдено: {ALLOWED_APPS[app][0]}"}
+        except Exception as e:
+            logger.exception("Ошибка запуска %s", app)
+            return {"state": self.state, "error": str(e)}
+
+        return {"state": self.state, "response": f"Открываю {app}"}
+
+    def _handle_memory_set(self, params: dict) -> dict:
+        key   = params.get("key",   "").strip()
+        value = params.get("value", "").strip()
+
+        if not key:
+            return {"state": self.state, "error": "Не указан ключ"}
+
+        self.memory[key] = value
+        return {"state": self.state, "response": f"Запомнил: {key} = {value}"}
