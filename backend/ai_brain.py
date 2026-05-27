@@ -210,6 +210,35 @@ INTENT_DATASET: dict[str, list[str]] = {
         "расскажи о себе", "как тебя использовать",
         "какие команды поддерживаются",
     ],
+
+    "open_downloads": [
+        "загрузки", "открой загрузки", "папка загрузки", "мои загрузки",
+        "покажи загрузки", "открой папку загрузки", "скачанные файлы",
+        "где мои скачанные файлы", "downloads",
+    ],
+
+    "open_cmd": [
+        "командная строка", "cmd", "открой cmd", "открой командную строку",
+        "терминал", "консоль", "открой консоль", "открой терминал",
+        "command prompt", "powershell",
+    ],
+
+    "open_chatgpt": [
+        "чат гпт", "chatgpt", "открой chatgpt", "chat gpt",
+        "открой чат гпт", "зайди на chatgpt", "хочу поговорить с гпт",
+        "открой нейросеть", "открой ии чат", "artificial intelligence chat",
+    ],
+
+    "open_calendar": [
+        "календарь", "открой календарь", "calendar",
+        "покажи календарь", "расписание", "открой расписание",
+    ],
+
+    "open_music": [
+        "музыка", "открой музыку", "плеер", "открой плеер",
+        "включи музыку", "хочу слушать музыку", "spotify",
+        "открой spotify", "яндекс музыка",
+    ],
 }
 
 
@@ -237,6 +266,11 @@ INTENT_HANDLERS: dict[str, tuple[str, dict] | str] = {
     "system_info":        ("get_system_info", {"info_type": "all"}),
     "time_info":          ("get_system_info", {"info_type": "time"}),
     "date_info":          ("get_system_info", {"info_type": "time"}),
+    "open_downloads":  ("open_system_app", {"app": "downloads"}),
+    "open_cmd":        ("open_system_app", {"app": "cmd"}),
+    "open_chatgpt":    ("open_url",        {"url": "https://chatgpt.com"}),
+    "open_calendar":   ("open_system_app", {"app": "calendar"}),
+    "open_music":      ("open_url",        {"url": "https://music.yandex.ru"}),
     # Текстовые ответы
     "greeting": "Привет! Чем могу помочь?",
     "thanks":   "Пожалуйста! Обращайся.",
@@ -289,6 +323,63 @@ class KeywordFallback:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  ИЗВЛЕЧЕНИЕ ПАРАМЕТРОВ (Entity Extraction)
+#  Вытаскивает числа и значения из текста команды
+# ═══════════════════════════════════════════════════════════════════════════
+
+class EntityExtractor:
+    """
+    Извлекает параметры из текста команды после классификации намерения.
+
+    Примеры:
+      "прибавь громкость на 10"  → {"level_delta": 10}
+      "поставь громкость 50"     → {"level_absolute": 50}
+      "открой загрузки"          → {}
+    """
+
+    # Паттерны для извлечения чисел
+    _NUMBER = r"(\d+)"
+
+    # Слова-маркеры для абсолютного уровня громкости
+    _ABS_MARKERS = ["поставь", "установи", "сделай", "выстави", "на уровне",
+                    "процентов", "%", "громкость"]
+    # Слова-маркеры для относительного изменения
+    _DELTA_MARKERS = ["прибавь", "добавь", "увеличь", "убавь", "уменьши",
+                      "на", "громче на", "тише на"]
+
+    def extract(self, text: str, intent: str) -> dict:
+        """Извлечь параметры из текста для данного намерения."""
+        t = text.lower().strip()
+        params = {}
+
+        # Извлечение числа для громкости
+        if intent in ("volume_up", "volume_down", "volume_mute",
+                      "volume_unmute", "volume_set"):
+            params.update(self._extract_volume_params(t, intent))
+
+        return params
+
+    def _extract_volume_params(self, text: str, intent: str) -> dict:
+        """Извлечь параметры громкости из текста."""
+        numbers = re.findall(self._NUMBER, text)
+        if not numbers:
+            return {}
+
+        number = int(numbers[0])
+
+        # "поставь громкость 50" / "громкость 50%" → абсолютное значение
+        abs_markers = ["поставь", "установи", "выстави", "процент", "%",
+                       "уровень", "значение"]
+        if any(m in text for m in abs_markers) or (
+            "громкость" in text and intent not in ("volume_up", "volume_down")
+        ):
+            return {"action": "set", "level": min(100, max(0, number))}
+
+        # "прибавь на 10" / "тише на 20" → относительное изменение
+        return {"delta": number}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  AI BRAIN
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -309,10 +400,11 @@ class AIBrain:
       model_name          — HuggingFace модель
     """
 
-    confidence_threshold: float = 0.45
+    confidence_threshold: float = 0.55
     model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"
 
     # Внутреннее состояние
+    _extractor: EntityExtractor = field(default_factory=EntityExtractor, init=False)
     _model:             Any  = field(default=None, init=False, repr=False)
     _intent_embeddings: dict = field(default_factory=dict, init=False)
     _intents:           list = field(default_factory=list, init=False)
@@ -391,7 +483,7 @@ class AIBrain:
                 logger.info("Модель ещё загружается, использую KeywordFallback")
             intent = self._fallback.match(user_text)
             if intent:
-                return await self._execute_intent(intent, registry_execute)
+                return await self._execute_intent(intent, user_text, registry_execute)
             return {"error": "Модель загружается, попробуй через несколько секунд"}
 
         # Классификация в executor — не блокируем event loop
@@ -413,10 +505,10 @@ class AIBrain:
             )
             fb_intent = self._fallback.match(user_text)
             if fb_intent:
-                return await self._execute_intent(fb_intent, registry_execute)
+                return await self._execute_intent(fb_intent, user_text, registry_execute)
             return {"error": "Команда не распознана. Попробуй иначе."}
 
-        return await self._execute_intent(intent, registry_execute)
+        return await self._execute_intent(intent, user_text, registry_execute)
 
     def clear_history(self) -> None:
         pass  # нет истории — каждый запрос независим
@@ -457,7 +549,8 @@ class AIBrain:
 
     # ─── Выполнение intent ────────────────────────────────────────────────
 
-    async def _execute_intent(self, intent: str, registry_execute) -> dict:
+    async def _execute_intent(self, intent: str, text: str,
+                              registry_execute) -> dict:
         handler = INTENT_HANDLERS.get(intent)
 
         if handler is None:
@@ -468,7 +561,21 @@ class AIBrain:
             return {"response": handler}
 
         # Вызов инструмента
-        tool_name, args = handler
+        tool_name, base_args = handler
+
+        # Извлечь параметры из текста и смерджить с базовыми args
+        extra = self._extractor.extract(text, intent)
+        args = {**base_args, **extra}
+
+        # Если извлекли абсолютный уровень громкости — переопределяем action
+        if tool_name == "set_volume" and "action" in extra:
+            args = extra  # extra уже содержит {"action": "set", "level": N}
+        elif tool_name == "set_volume" and "delta" in extra:
+            # Передаём дельту — system_tools разберётся
+            args = {**base_args, "delta": extra["delta"]}
+
+        logger.info("Выполняю: %s(%s)", tool_name, args)
+
         try:
             return await registry_execute(tool_name, args)
         except Exception as exc:
