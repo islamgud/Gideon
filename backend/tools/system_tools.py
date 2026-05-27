@@ -327,15 +327,17 @@ async def _sysinfo_tool(args: dict) -> dict:
 #  5. УПРАВЛЕНИЕ ГРОМКОСТЬЮ
 # ═══════════════════════════════════════════════════════════════════════════
 
-def set_volume(action: str, level: int | None = None) -> dict:
+def set_volume(action: str, level: int | None = None,
+               delta: int | None = None) -> dict:
     """
     Управление громкостью.
     action: "mute" | "unmute" | "up" | "down" | "set"
-    level:  0-100 (только для action="set")
+    level:  0-100 (для action="set")
+    delta:  шаг изменения в % (для action="up"/"down")
     """
     try:
         if _OS == "Windows":
-            return _volume_windows(action, level)
+            return _volume_windows(action, level, delta)
         elif _OS == "Darwin":
             return _volume_macos(action, level)
         elif _OS == "Linux":
@@ -346,32 +348,111 @@ def set_volume(action: str, level: int | None = None) -> dict:
         return _err(str(exc))
 
 
-def _volume_windows(action: str, level: int | None) -> dict:
-    """Управление громкостью через PowerShell (без сторонних зависимостей)."""
-    scripts = {
-        "mute":   "(New-Object -com WScript.Shell).SendKeys([char]173)",
-        "unmute": "(New-Object -com WScript.Shell).SendKeys([char]173)",
-        "up":     "(New-Object -com WScript.Shell).SendKeys([char]175)",
-        "down":   "(New-Object -com WScript.Shell).SendKeys([char]174)",
-    }
-    if action == "set" and level is not None:
-        # Установить точный уровень через COM
-        script = (
-            f"$vol = New-Object -ComObject WScript.Shell; "
-            f"$wmp = New-Object -ComObject WMPlayer.OCX.7; "
-            f"$wmp.settings.volume = {level}"
-        )
-    elif action in scripts:
-        script = scripts[action]
-    else:
+def _volume_windows(action: str, level: int | None,
+                    delta: int | None = None) -> dict:
+    """
+    Управление громкостью Windows.
+    Приоритет: pycaw (точный) → nircmd → PowerShell keypress (fallback)
+    """
+    # ── Метод 1: pycaw — самый точный ───────────────────────────────────
+    try:
+        from ctypes import cast, POINTER
+        from comtypes import CLSCTX_ALL
+        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+
+        devices = AudioUtilities.GetSpeakers()
+        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+        volume = cast(interface, POINTER(IAudioEndpointVolume))
+
+        if action == "mute":
+            volume.SetMute(1, None)
+            return _ok("Звук отключён")
+
+        if action == "unmute":
+            volume.SetMute(0, None)
+            return _ok("Звук включён")
+
+        # Текущий уровень 0.0-1.0
+        current = round(volume.GetMasterVolumeLevelScalar() * 100)
+
+        if action == "set" and level is not None:
+            volume.SetMasterVolumeLevelScalar(level / 100, None)
+            return _ok(f"Громкость: {level}%")
+
+        if action == "up":
+            step = delta if delta is not None else 10
+            new_level = min(100, current + step)
+            volume.SetMasterVolumeLevelScalar(new_level / 100, None)
+            return _ok(f"Громкость: {new_level}%")
+
+        if action == "down":
+            step = delta if delta is not None else 10
+            new_level = max(0, current - step)
+            volume.SetMasterVolumeLevelScalar(new_level / 100, None)
+            return _ok(f"Громкость: {new_level}%")
+
         return _err(f"Неизвестное действие: {action!r}")
 
+    except ImportError:
+        pass  # pycaw не установлен — идём дальше
+    except Exception as exc:
+        logger.warning("pycaw ошибка: %s", exc)
+
+    # ── Метод 2: nircmd (если установлен) ───────────────────────────────
+    try:
+        if action == "mute":
+            subprocess.run(["nircmd", "mutesysvolume", "1"], check=True,
+                          capture_output=True)
+            return _ok("Звук отключён")
+        if action == "unmute":
+            subprocess.run(["nircmd", "mutesysvolume", "0"], check=True,
+                          capture_output=True)
+            return _ok("Звук включён")
+        if action == "set" and level is not None:
+            val = int(65535 * level / 100)
+            subprocess.run(["nircmd", "setsysvolume", str(val)], check=True,
+                          capture_output=True)
+            return _ok(f"Громкость: {level}%")
+        if action in ("up", "down"):
+            step = delta if delta is not None else 10
+            val = int(65535 * step / 100)
+            cmd = "changesysvolume"
+            amount = str(val) if action == "up" else str(-val)
+            subprocess.run(["nircmd", cmd, amount], check=True,
+                          capture_output=True)
+            label = "увеличена" if action == "up" else "уменьшена"
+            return _ok(f"Громкость {label} на {step}%")
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+
+    # ── Метод 3: PowerShell keypress fallback ────────────────────────────
+    key_map = {
+        "mute":   173,  # VK_VOLUME_MUTE
+        "unmute": 173,
+        "up":     175,  # VK_VOLUME_UP
+        "down":   174,  # VK_VOLUME_DOWN
+    }
+    key = key_map.get(action)
+    if key is None:
+        return _err(f"Неизвестное действие: {action!r}")
+
+    # Количество нажатий = delta / 2 (каждое нажатие = ~2%)
+    presses = max(1, (delta or 10) // 2) if action in ("up", "down") else 1
+    script = (
+        f"$wsh = New-Object -ComObject WScript.Shell; "
+        f"for($i=0; $i -lt {presses}; $i++) "
+        f"{{ $wsh.SendKeys([char]{key}) }}"
+    )
     subprocess.Popen(
-        ["powershell", "-NonInteractive", "-Command", script],
+        ["powershell", "-NonInteractive", "-WindowStyle", "Hidden",
+         "-Command", script],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
-    labels = {"mute": "Звук отключён", "unmute": "Звук включён",
-              "up": "Громче", "down": "Тише", "set": f"Громкость: {level}%"}
+    labels = {
+        "mute": "Звук отключён", "unmute": "Звук включён",
+        "up": f"Громче на ~{(delta or 10)}%",
+        "down": f"Тише на ~{(delta or 10)}%",
+    }
     return _ok(labels.get(action, "Готово"))
 
 
@@ -418,51 +499,8 @@ async def _volume_tool(args: dict) -> dict:
     if not action:
         return {"error": "action не указан"}
 
-    # Если передана дельта — конвертируем в set с вычисленным уровнем
-    if delta is not None and action in ("up", "down"):
-        result = await _async(_volume_with_delta, action, delta)
-        return _to_tool_result(result)
-
-    result = await _async(set_volume, action, level)
+    result = await _async(set_volume, action, level, delta)
     return _to_tool_result(result)
-
-
-def _volume_with_delta(action: str, delta: int) -> dict:
-    """Изменить громкость на конкретное значение через PowerShell."""
-    if _OS != "Windows":
-        # На не-Windows просто используем up/down несколько раз
-        fn = lambda: set_volume(action)
-        for _ in range(min(delta // 5, 10)):
-            fn()
-        return _ok(f"Громкость {'увеличена' if action == 'up' else 'уменьшена'} на {delta}")
-
-    sign = "+" if action == "up" else "-"
-    script = (
-        f"$vol = (Get-AudioDevice -Playback).Volume; "
-        f"Set-AudioDevice -PlaybackVolume ([Math]::Min(100, [Math]::Max(0, $vol {sign} {delta})))"
-    )
-    # Пробуем через AudioDeviceCmdlets, если нет — через нативный COM
-    try:
-        subprocess.run(
-            ["powershell", "-NonInteractive", "-Command", script],
-            check=True, capture_output=True, timeout=3
-        )
-        label = "увеличена" if action == "up" else "уменьшена"
-        return _ok(f"Громкость {label} на {delta}%")
-    except Exception:
-        # Fallback: просто нажать клавишу нужное кол-во раз
-        key = 175 if action == "up" else 174  # VK_VOLUME_UP / VK_VOLUME_DOWN
-        presses = max(1, delta // 2)
-        script_fallback = (
-            f"$wsh = New-Object -ComObject WScript.Shell; "
-            f"for($i=0; $i -lt {presses}; $i++) {{ $wsh.SendKeys([char]{key}) }}"
-        )
-        subprocess.Popen(
-            ["powershell", "-NonInteractive", "-Command", script_fallback],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-        )
-        label = "увеличена" if action == "up" else "уменьшена"
-        return _ok(f"Громкость {label} на ~{presses * 2}%")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
