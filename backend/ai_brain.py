@@ -105,6 +105,24 @@ SYSTEM_PROMPT = """Ты — ИИ-ядро голосового ассистен�
 "который час" → {"action": "get_info", "value": "time"}
 "привет" → {"action": "answer", "value": "Привет! Чем могу помочь?"}
 "покажи настройки wifi" → {"action": "system_command", "value": "ncpa.cpl"}
+"открой параметры" → {"action": "system_command", "value": "ms-settings:"}
+"открой параметры windows" → {"action": "system_command", "value": "ms-settings:"}
+"открой персонализацию" → {"action": "system_command", "value": "ms-settings:personalization"}
+"открой обои" → {"action": "system_command", "value": "ms-settings:personalization-background"}
+"открой bluetooth" → {"action": "system_command", "value": "ms-settings:bluetooth"}
+"открой звук" → {"action": "system_command", "value": "ms-settings:sound"}
+"открой дисплей" → {"action": "system_command", "value": "ms-settings:display"}
+"открой обновления" → {"action": "system_command", "value": "ms-settings:windowsupdate"}
+"открой приложения" → {"action": "system_command", "value": "ms-settings:appsfeatures"}
+"открой уведомления" → {"action": "system_command", "value": "ms-settings:notifications"}
+"открой учётные записи" → {"action": "system_command", "value": "ms-settings:accounts"}
+"открой конфиденциальность" → {"action": "system_command", "value": "ms-settings:privacy"}
+"открой сеть" → {"action": "system_command", "value": "ms-settings:network"}
+"открой диспетчер задач" → {"action": "system_command", "value": "taskmgr"}
+"открой панель управления" → {"action": "system_command", "value": "control"}
+"открой реестр" → {"action": "system_command", "value": "regedit"}
+"открой службы" → {"action": "system_command", "value": "services.msc"}
+"открой диспетчер устройств" → {"action": "system_command", "value": "devmgmt.msc"}
 
 Отвечай ТОЛЬКО валидным JSON. Никакого текста вокруг."""
 
@@ -259,10 +277,26 @@ class CommandExecutor:
             tool_name, args = mapping
             return await registry_execute(tool_name, args)
 
-        # Неизвестная системная команда — пробуем запустить как msc/cpl
+        # ms-settings: — современные параметры Windows 10/11
         import subprocess
+        if value.startswith("ms-settings:"):
+            try:
+                subprocess.Popen(["start", value], shell=True)
+                return {"response": f"Открываю настройки"}
+            except Exception as exc:
+                return {"error": str(exc)}
+
+        # .msc / .cpl — системные оснастки
+        if value.endswith((".msc", ".cpl")):
+            try:
+                subprocess.Popen(["start", value], shell=True)
+                return {"response": f"Открываю {value}"}
+            except Exception as exc:
+                return {"error": str(exc)}
+
+        # taskmgr, regedit, control и другие exe
         try:
-            subprocess.Popen(["control", value], shell=True)
+            subprocess.Popen([value], shell=True)
             return {"response": f"Выполняю: {value}"}
         except Exception as exc:
             return {"error": str(exc)}
