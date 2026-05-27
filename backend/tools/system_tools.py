@@ -356,13 +356,20 @@ def _volume_windows(action: str, level: int | None,
     """
     # ── Метод 1: pycaw — самый точный ───────────────────────────────────
     try:
-        from ctypes import cast, POINTER
-        from comtypes import CLSCTX_ALL
-        from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+        from pycaw.pycaw import AudioUtilities
 
-        devices = AudioUtilities.GetSpeakers()
-        interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-        volume = cast(interface, POINTER(IAudioEndpointVolume))
+        device = AudioUtilities.GetSpeakers()
+
+        # Новые версии pycaw: атрибут EndpointVolume напрямую
+        if hasattr(device, 'EndpointVolume'):
+            volume = device.EndpointVolume
+        else:
+            # Старые версии pycaw
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import IAudioEndpointVolume
+            interface = device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            volume = cast(interface, POINTER(IAudioEndpointVolume))
 
         if action == "mute":
             volume.SetMute(1, None)
