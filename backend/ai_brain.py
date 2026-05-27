@@ -87,7 +87,11 @@ SYSTEM_PROMPT = """Ты — ИИ-ядро голосового ассистен�
    {"action": "get_info", "value": "тип"}
    Значения value: time, date, cpu, memory, disk, os, all
 
-6. answer — ответить текстом (только если это не команда)
+6. change_language — сменить язык системы или раскладку клавиатуры
+   {"action": "change_language", "value": "язык"}
+   Значения value: en, ru, de, fr, zh, ja, ko, ar, tr — код языка ISO 639-1
+
+7. answer — ответить текстом (только если это не команда)
    {"action": "answer", "value": "текст ответа"}
 
 Примеры:
@@ -123,6 +127,10 @@ SYSTEM_PROMPT = """Ты — ИИ-ядро голосового ассистен�
 "открой реестр" → {"action": "system_command", "value": "regedit"}
 "открой службы" → {"action": "system_command", "value": "services.msc"}
 "открой диспетчер устройств" → {"action": "system_command", "value": "devmgmt.msc"}
+"поставь английский язык" → {"action": "change_language", "value": "en"}
+"смени язык на русский" → {"action": "change_language", "value": "ru"}
+"поменяй язык на немецкий" → {"action": "change_language", "value": "de"}
+"переключи раскладку на английский" → {"action": "change_language", "value": "en"}
 
 Отвечай ТОЛЬКО валидным JSON. Никакого текста вокруг."""
 
@@ -159,11 +167,88 @@ class CommandExecutor:
         elif action == "get_info":
             return await registry_execute("get_system_info", {"info_type": value or "all"})
 
+        elif action == "change_language":
+            return await self._change_language(value, registry_execute)
+
         elif action == "answer":
             return {"response": value}
 
         else:
             return {"error": f"Неизвестное действие: {action}"}
+
+    async def _change_language(self, lang: str, registry_execute) -> dict:
+        """
+        Сменить язык ввода/раскладку клавиатуры через PowerShell.
+        lang: код ISO 639-1 (en, ru, de, fr, ...)
+        """
+        import subprocess
+
+        # Маппинг кода языка → Windows culture code
+        LANG_MAP = {
+            "en": "en-US",
+            "ru": "ru-RU",
+            "de": "de-DE",
+            "fr": "fr-FR",
+            "zh": "zh-CN",
+            "ja": "ja-JP",
+            "ko": "ko-KR",
+            "ar": "ar-SA",
+            "tr": "tr-TR",
+            "uk": "uk-UA",
+            "pl": "pl-PL",
+            "es": "es-ES",
+            "it": "it-IT",
+        }
+
+        LANG_NAMES = {
+            "en": "английский",
+            "ru": "русский",
+            "de": "немецкий",
+            "fr": "французский",
+            "zh": "китайский",
+            "ja": "японский",
+            "ko": "корейский",
+            "ar": "арабский",
+            "tr": "турецкий",
+            "uk": "украинский",
+            "pl": "польский",
+            "es": "испанский",
+            "it": "итальянский",
+        }
+
+        culture = LANG_MAP.get(lang.lower())
+        if not culture:
+            return {"error": f"Неизвестный язык: {lang}"}
+
+        # PowerShell скрипт — устанавливает язык ввода
+        ps_script = f"""
+$lang = "{culture}"
+$langList = Get-WinUserLanguageList
+$exists = $langList | Where-Object {{ $_.LanguageTag -eq $lang }}
+if (-not $exists) {{
+    $langList.Add($lang)
+    Set-WinUserLanguageList $langList -Force
+}}
+# Переместить нужный язык на первое место
+$sorted = @($langList | Where-Object {{ $_.LanguageTag -eq $lang }}) + 
+          @($langList | Where-Object {{ $_.LanguageTag -ne $lang }})
+Set-WinUserLanguageList $sorted -Force
+"""
+        try:
+            result = subprocess.run(
+                ["powershell", "-NonInteractive", "-Command", ps_script],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                name = LANG_NAMES.get(lang.lower(), lang)
+                return {"response": f"Язык изменён на {name}"}
+            else:
+                # Fallback — просто открываем настройки языка
+                subprocess.Popen(["start", "ms-settings:language"], shell=True)
+                return {"response": "Открываю настройки языка"}
+        except Exception as exc:
+            subprocess.Popen(["start", "ms-settings:language"], shell=True)
+            return {"response": "Открываю настройки языка"}
 
     async def _open_url(self, url: str, registry_execute) -> dict:
         if not url.startswith(("http://", "https://")):
