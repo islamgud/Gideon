@@ -413,10 +413,56 @@ def _volume_linux(action: str, level: int | None) -> dict:
 async def _volume_tool(args: dict) -> dict:
     action = args.get("action", "")
     level  = args.get("level")
+    delta  = args.get("delta")
+
     if not action:
         return {"error": "action не указан"}
+
+    # Если передана дельта — конвертируем в set с вычисленным уровнем
+    if delta is not None and action in ("up", "down"):
+        result = await _async(_volume_with_delta, action, delta)
+        return _to_tool_result(result)
+
     result = await _async(set_volume, action, level)
     return _to_tool_result(result)
+
+
+def _volume_with_delta(action: str, delta: int) -> dict:
+    """Изменить громкость на конкретное значение через PowerShell."""
+    if _OS != "Windows":
+        # На не-Windows просто используем up/down несколько раз
+        fn = lambda: set_volume(action)
+        for _ in range(min(delta // 5, 10)):
+            fn()
+        return _ok(f"Громкость {'увеличена' if action == 'up' else 'уменьшена'} на {delta}")
+
+    sign = "+" if action == "up" else "-"
+    script = (
+        f"$vol = (Get-AudioDevice -Playback).Volume; "
+        f"Set-AudioDevice -PlaybackVolume ([Math]::Min(100, [Math]::Max(0, $vol {sign} {delta})))"
+    )
+    # Пробуем через AudioDeviceCmdlets, если нет — через нативный COM
+    try:
+        subprocess.run(
+            ["powershell", "-NonInteractive", "-Command", script],
+            check=True, capture_output=True, timeout=3
+        )
+        label = "увеличена" if action == "up" else "уменьшена"
+        return _ok(f"Громкость {label} на {delta}%")
+    except Exception:
+        # Fallback: просто нажать клавишу нужное кол-во раз
+        key = 175 if action == "up" else 174  # VK_VOLUME_UP / VK_VOLUME_DOWN
+        presses = max(1, delta // 2)
+        script_fallback = (
+            f"$wsh = New-Object -ComObject WScript.Shell; "
+            f"for($i=0; $i -lt {presses}; $i++) {{ $wsh.SendKeys([char]{key}) }}"
+        )
+        subprocess.Popen(
+            ["powershell", "-NonInteractive", "-Command", script_fallback],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        label = "увеличена" if action == "up" else "уменьшена"
+        return _ok(f"Громкость {label} на ~{presses * 2}%")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -503,6 +549,15 @@ _SYSTEM_APPS: dict[str, dict] = {
     "devmgmt":  {"cmd": ["devmgmt.msc"],       "name": "Диспетчер устройств"},
     "eventvwr": {"cmd": ["eventvwr"],          "name": "Просмотр событий"},
     "perfmon":  {"cmd": ["perfmon"],           "name": "Монитор ресурсов"},
+    "powershell": {"cmd": ["powershell"],        "name": "PowerShell"},
+    "calendar": {
+        "cmd": ["explorer", "shell:appsFolder\\Microsoft.WindowsAlarms_8wekyb3d8bbwe!App"],
+        "name": "Календарь",
+    },
+    "downloads": {
+        "cmd": ["explorer", os.path.join(os.path.expanduser("~"), "Downloads")],
+        "name": "Загрузки",
+    },
 }
 
 def open_system_app(app: str) -> dict:
