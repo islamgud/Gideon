@@ -4,3 +4,5 @@ SpeechRecognition>=3.10
 pyaudio>=0.2.13
 groq>=0.9.0
 python-dotenv>=1.0.0
+pycaw>=20181226
+comtypes>=1.2.0
