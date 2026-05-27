@@ -6,6 +6,17 @@ main.py — точка входа GIDEON.
   2. pywebview в главном потоке: окно с frontend/index.html
 """
 
+# Загружаем .env до всех импортов — чтобы TRANSFORMERS_OFFLINE сработал
+import os as _os
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _load_dotenv()
+    _os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    _os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    _os.environ.setdefault("HF_HUB_VERBOSITY", "error")
+except ImportError:
+    pass
+
 import asyncio
 import logging
 import os
