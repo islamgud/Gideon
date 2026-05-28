@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -17,9 +16,9 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
   position: fixed; bottom: 52px; left: 50%;
   transform: translateX(-50%);
   font-family: 'Orbitron', 'Courier New', monospace;
-  font-size: clamp(30px, 4.5vw, 54px); font-weight: 600;
+  font-size: clamp(30px, 4.5vw, 54px); font-weight: 700;
   letter-spacing: clamp(12px, 2.5vw, 24px);
-  color: rgba(40, 95, 170, 0.62);
+  color: rgba(46, 100, 178, 0.66);
   pointer-events: none; white-space: nowrap;
   text-shadow: 0 0 40px rgba(80,160,255,0.20), 0 2px 8px rgba(20,60,140,0.12);
   animation: breathe 4s ease-in-out infinite alternate;
@@ -35,24 +34,11 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
   color: rgba(50,110,190,0.32); pointer-events: none;
   white-space: nowrap; text-transform: uppercase; transition: opacity 0.4s ease;
 }
-#dev-controls {
-  position: fixed; top: 18px; right: 18px; display: flex; gap: 8px; z-index: 100;
-}
-#dev-controls button {
-  font-family: 'Courier New', monospace; font-size: 9px;
-  letter-spacing: 3px; text-transform: uppercase;
-  padding: 6px 12px; border-radius: 2px; cursor: pointer;
-  background: rgba(200,220,245,0.80); border: 1px solid rgba(60,120,210,0.30);
-  color: rgba(40,90,170,0.80); transition: all 0.2s;
-}
-#dev-controls button:hover  { background: rgba(180,210,240,0.90); border-color: rgba(60,140,220,0.55); }
-#dev-controls button.active { background: rgba(80,140,220,0.85); border-color: rgba(60,140,220,0.80); color:#fff; }
-#btn-anim-test { border-color:rgba(80,160,255,0.50)!important; color:rgba(40,100,200,0.90)!important; }
 
 /* ── COMMAND PANEL ───────────────────────────────────────────────────── */
 #command-panel {
   position: fixed;
-  bottom: 100px; left: 50%;
+  bottom: 150px; left: 50%;
   transform: translateX(-50%);
   display: flex; align-items: center; gap: 10px;
   z-index: 200;
@@ -65,46 +51,60 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
   pointer-events: auto;
 }
 #cmd-input {
-  font-family: 'Courier New', monospace; font-size: 12px;
-  letter-spacing: 2px; text-transform: uppercase;
+  font-family: 'Courier New', monospace; font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
   width: clamp(220px, 36vw, 460px);
-  padding: 9px 16px;
-  background: rgba(200,225,250,0.70);
-  border: 1px solid rgba(60,120,210,0.35);
-  border-radius: 2px;
-  color: rgba(30,70,160,0.90);
+  padding: 11px 18px;
+  background: rgba(205,228,250,0.72);
+  border: 1px solid rgba(70,130,215,0.32);
+  border-radius: 18px;
+  color: rgba(48,92,178,0.92);
   outline: none;
-  transition: background 0.2s, border-color 0.2s;
+  transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
 }
-#cmd-input::placeholder { color: rgba(80,130,200,0.45); }
+#cmd-input::placeholder { color: rgba(95,140,205,0.50); font-weight: 600; }
 #cmd-input:focus {
-  background: rgba(210,232,255,0.88);
-  border-color: rgba(60,140,220,0.65);
+  background: rgba(214,234,255,0.90);
+  border-color: rgba(70,150,225,0.62);
+  box-shadow: 0 0 0 3px rgba(90,160,240,0.12);
 }
 #cmd-send {
-  font-family: 'Courier New', monospace; font-size: 9px;
-  letter-spacing: 3px; text-transform: uppercase;
-  padding: 9px 14px;
-  background: rgba(80,140,220,0.80); border: 1px solid rgba(60,140,220,0.80);
-  border-radius: 2px; color: #fff; cursor: pointer;
+  font-family: 'Courier New', monospace; font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 11px 16px;
+  background: rgba(85,145,222,0.82); border: 1px solid rgba(70,140,222,0.82);
+  border-radius: 16px; color: #fff; cursor: pointer;
   transition: background 0.2s;
 }
-#cmd-send:hover { background: rgba(60,120,200,0.95); }
+#cmd-send:hover { background: rgba(65,125,205,0.95); }
 
-/* ── MIC BUTTON ──────────────────────────────────────────────────────── */
-#mic-btn {
+/* ── ACTION BUTTONS (mic + keyboard) ─────────────────────────────────── */
+#action-buttons {
   position: fixed;
   bottom: 100px; right: 34px;
+  display: flex; align-items: center; gap: 12px;
+  z-index: 200;
+}
+.action-btn {
   width: 46px; height: 46px;
   border-radius: 50%;
   background: rgba(200,225,250,0.78);
   border: 1.5px solid rgba(60,120,210,0.38);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  z-index: 200;
   transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
+  padding: 0;
 }
-#mic-btn:hover { background: rgba(180,215,245,0.92); border-color: rgba(60,140,225,0.60); }
+.action-btn:hover { background: rgba(180,215,245,0.92); border-color: rgba(60,140,225,0.60); }
+.action-btn svg { pointer-events: none; }
+
+#kbd-btn.active {
+  background: rgba(80,140,220,0.85);
+  border-color: rgba(60,140,220,0.90);
+}
+
 #mic-btn.listening {
   background: rgba(80,140,220,0.85);
   border-color: rgba(60,140,220,0.90);
@@ -116,7 +116,86 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
   70%  { box-shadow: 0 0 0 14px rgba(80,160,255,0.00); }
   100% { box-shadow: 0 0 0 0   rgba(80,160,255,0.00); }
 }
-#mic-icon { pointer-events: none; }
+
+/* ── COMMANDS LIST WINDOW ────────────────────────────────────────────── */
+#commands-window {
+  position: fixed;
+  bottom: 160px; right: 34px;
+  width: clamp(240px, 32vw, 360px);
+  max-height: 56vh;
+  display: flex; flex-direction: column;
+  background: rgba(212,232,252,0.92);
+  border: 1px solid rgba(70,140,222,0.34);
+  border-radius: 20px;
+  box-shadow: 0 8px 32px rgba(30,70,150,0.18), 0 2px 8px rgba(30,70,150,0.10);
+  backdrop-filter: blur(6px);
+  z-index: 210;
+  opacity: 0;
+  transform: translateY(10px) scale(0.97);
+  transform-origin: bottom right;
+  transition: opacity 0.28s ease, transform 0.28s ease;
+  pointer-events: none;
+  overflow: hidden;
+}
+#commands-window.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+#commands-window .cw-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 18px 11px;
+  border-bottom: 1px solid rgba(70,140,222,0.18);
+}
+#commands-window .cw-title {
+  font-family: 'Courier New', monospace; font-size: 12px;
+  font-weight: 700; letter-spacing: 1px;
+  color: rgba(48,92,178,0.92);
+}
+#commands-window .cw-close {
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: rgba(95,150,215,0.16);
+  border: none; cursor: pointer;
+  color: rgba(55,100,185,0.78);
+  font-size: 16px; line-height: 1;
+  transition: background 0.18s, color 0.18s;
+}
+#commands-window .cw-close:hover {
+  background: rgba(95,150,215,0.30);
+  color: rgba(40,85,170,0.95);
+}
+#commands-window .cw-body {
+  padding: 8px 10px 12px;
+  overflow-y: auto;
+}
+#commands-window .cw-item {
+  font-family: 'Courier New', monospace; font-size: 12px;
+  font-weight: 600; letter-spacing: 0.4px;
+  color: rgba(52,96,180,0.88);
+  padding: 9px 13px; margin: 3px 4px;
+  border-radius: 12px;
+  background: rgba(180,212,245,0.42);
+  cursor: pointer;
+  transition: background 0.16s, color 0.16s;
+}
+#commands-window .cw-item:hover {
+  background: rgba(120,175,235,0.55);
+  color: rgba(30,72,160,0.98);
+}
+#commands-window .cw-item .cw-desc {
+  display: block; margin-top: 3px;
+  font-size: 10px; font-weight: 500;
+  color: rgba(70,115,190,0.62);
+}
+#commands-window .cw-status {
+  font-family: 'Courier New', monospace; font-size: 11px;
+  font-weight: 600; letter-spacing: 0.5px;
+  color: rgba(70,115,190,0.70);
+  text-align: center; padding: 22px 14px;
+}
+#commands-window .cw-status.error { color: rgba(180,60,60,0.82); }
 
 /* ── RESPONSE PANEL ──────────────────────────────────────────────────── */
 #response-panel {
@@ -140,32 +219,12 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
 }
 #response-panel.visible { opacity: 1; }
 #response-panel.error   { color: rgba(180,50,50,0.82); border-color: rgba(200,80,80,0.30); }
-
-/* ── TOGGLE CMD BUTTON ───────────────────────────────────────────────── */
-#btn-cmd-toggle {
-  border-color: rgba(80,140,220,0.45)!important;
-  color: rgba(40,100,195,0.85)!important;
-}
-#btn-cmd-toggle.active {
-  background: rgba(80,140,220,0.85)!important;
-  color: #fff!important;
-}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <div id="gideon-label">GIDEON</div>
 <div id="sub">NEURAL CORE ACTIVE</div>
-<div id="dev-controls">
-  <button onclick="setState('idle')"    id="btn-idle">IDLE</button>
-  <button onclick="setState('think')"   id="btn-think">THINK</button>
-  <button onclick="setState('listen')"  id="btn-listen">LISTEN</button>
-  <button onclick="setState('speak')"   id="btn-speak">SPEAK</button>
-  <button onclick="runAnimationTest()"  id="btn-anim-test">ANIMATION TEST</button>
-  <button onclick="gideonDismiss()"     id="btn-dismiss" style="border-color:rgba(200,80,80,0.45)!important;color:rgba(180,60,60,0.9)!important;">DISMISS</button>
-  <button onclick="gideonSummon()"      id="btn-summon"  style="border-color:rgba(60,180,100,0.45)!important;color:rgba(40,160,80,0.9)!important;">SUMMON</button>
-  <button onclick="toggleCommandPanel()" id="btn-cmd-toggle">CMD</button>
-</div>
 
 <!-- ── Command input panel ─────────────────────────────────── -->
 <div id="command-panel">
@@ -173,16 +232,40 @@ canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
   <button id="cmd-send" onclick="sendTextCommand()">SEND</button>
 </div>
 
-<!-- ── Mic button ─────────────────────────────────────────── -->
-<button id="mic-btn" title="Голосовая команда" onclick="sendVoiceCommand()">
-  <svg id="mic-icon" width="22" height="22" viewBox="0 0 24 24" fill="none"
-       stroke="rgba(40,90,170,0.80)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <rect x="9" y="2" width="6" height="11" rx="3"/>
-    <path d="M5 10a7 7 0 0 0 14 0"/>
-    <line x1="12" y1="19" x2="12" y2="22"/>
-    <line x1="8"  y1="22" x2="16" y2="22"/>
-  </svg>
-</button>
+<!-- ── Action buttons (keyboard + mic) ─────────────────────── -->
+<div id="action-buttons">
+  <button id="kbd-btn" class="action-btn" title="Команда с клавиатуры" onclick="toggleCommandPanel()">
+    <svg id="kbd-icon" width="22" height="22" viewBox="0 0 24 24" fill="none"
+         stroke="rgba(40,90,170,0.80)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="6" width="20" height="12" rx="2"/>
+      <line x1="6"  y1="10" x2="6"  y2="10"/>
+      <line x1="10" y1="10" x2="10" y2="10"/>
+      <line x1="14" y1="10" x2="14" y2="10"/>
+      <line x1="18" y1="10" x2="18" y2="10"/>
+      <line x1="8"  y1="14" x2="16" y2="14"/>
+    </svg>
+  </button>
+  <button id="mic-btn" class="action-btn" title="Голосовая команда" onclick="sendVoiceCommand()">
+    <svg id="mic-icon" width="22" height="22" viewBox="0 0 24 24" fill="none"
+         stroke="rgba(40,90,170,0.80)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="2" width="6" height="11" rx="3"/>
+      <path d="M5 10a7 7 0 0 0 14 0"/>
+      <line x1="12" y1="19" x2="12" y2="22"/>
+      <line x1="8"  y1="22" x2="16" y2="22"/>
+    </svg>
+  </button>
+</div>
+
+<!-- ── Commands list window ────────────────────────────────── -->
+<div id="commands-window">
+  <div class="cw-header">
+    <span class="cw-title">Список команд</span>
+    <button class="cw-close" onclick="closeCommandsWindow()" title="Закрыть">&times;</button>
+  </div>
+  <div class="cw-body" id="cw-body">
+    <div class="cw-status">Загрузка…</div>
+  </div>
+</div>
 
 <!-- ── Response / status panel ───────────────────────────── -->
 <div id="response-panel"></div>
@@ -215,11 +298,8 @@ window.addEventListener('resize', resize);
 
 // ═══════════════════════════════════════════════════════════════
 //  LOD — система качества
-//  Управляет: кол-вом частиц, шагом wireframe, эффектами
-//  idle=low, think=mid, speak/listen=high
 // ═══════════════════════════════════════════════════════════════
 const LOD = {
-  // Конфигурации уровней
   levels: {
     low:  { partStep: 3, wireStep: 2, glowPasses: 1, dotGradient: false },
     mid:  { partStep: 2, wireStep: 1, glowPasses: 1, dotGradient: false },
@@ -324,9 +404,6 @@ function setState(state) {
   if (state!=='think' && prev==='think') exitThink();
   if (state==='speak' && prev!=='speak') enterSpeakCorner();
   if (state!=='speak' && prev==='speak') exitSpeakCorner();
-  document.querySelectorAll('#dev-controls button').forEach(b=>b.classList.remove('active'));
-  const btn = document.getElementById('btn-'+state);
-  if (btn) btn.classList.add('active');
 }
 setState('idle');
 
@@ -346,6 +423,8 @@ let _ws = null;
         if (typeof m.amplitude === 'number') setListenAmplitude(m.amplitude);
         // Показать распознанный текст
         if (m.recognized) showResponse('RECOGNIZED: ' + m.recognized, false);
+        // Список команд от бэкенда
+        if (Array.isArray(m.commands)) renderCommandsList(m.commands);
         // Показать ответ на команду
         if (m.response)   showResponse(m.response, m.status === 'error');
       } catch(_){}
@@ -360,10 +439,80 @@ function sendTextCommand() {
   const input = document.getElementById('cmd-input');
   const cmd   = input.value.trim();
   if (!cmd) return;
+
+  // Спец-команда «Команды» → открыть окно со списком (любой регистр)
+  if (cmd.toLowerCase() === 'команды') {
+    input.value = '';
+    openCommandsWindow();
+    return;
+  }
+
   if (_ws && _ws.readyState === WebSocket.OPEN) {
     _ws.send(JSON.stringify({ type: 'text_command', command: cmd }));
   }
   input.value = '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  COMMANDS LIST WINDOW
+// ═══════════════════════════════════════════════════════════════
+let _cmdWindowVisible = false;
+
+/** Открыть окно команд и запросить список с бэкенда. */
+function openCommandsWindow() {
+  const win  = document.getElementById('commands-window');
+  const body = document.getElementById('cw-body');
+  _cmdWindowVisible = true;
+  win.classList.add('visible');
+
+  if (_ws && _ws.readyState === WebSocket.OPEN) {
+    body.innerHTML = '<div class="cw-status">Загрузка…</div>';
+    _ws.send(JSON.stringify({ type: 'list_commands' }));
+  } else {
+    body.innerHTML = '<div class="cw-status error">Нет связи с ядром</div>';
+  }
+}
+
+/** Закрыть окно команд. */
+function closeCommandsWindow() {
+  _cmdWindowVisible = false;
+  document.getElementById('commands-window').classList.remove('visible');
+}
+
+/**
+ * Отрисовать список команд, полученный с бэкенда.
+ * Поддерживает форматы: ["cmd1","cmd2"] или [{name, description}].
+ */
+function renderCommandsList(commands) {
+  const body = document.getElementById('cw-body');
+  if (!commands || commands.length === 0) {
+    body.innerHTML = '<div class="cw-status">Команды не найдены</div>';
+    return;
+  }
+  body.innerHTML = '';
+  commands.forEach(c => {
+    const name = (typeof c === 'string') ? c : (c.name || c.command || '');
+    const desc = (typeof c === 'object' && c) ? (c.description || c.desc || '') : '';
+    if (!name) return;
+    const item = document.createElement('div');
+    item.className = 'cw-item';
+    item.textContent = name;
+    if (desc) {
+      const d = document.createElement('span');
+      d.className = 'cw-desc';
+      d.textContent = desc;
+      item.appendChild(d);
+    }
+    // Клик по команде → подставить в строку ввода
+    item.addEventListener('click', () => {
+      const input = document.getElementById('cmd-input');
+      input.value = name;
+      if (!_cmdPanelVisible) toggleCommandPanel();
+      input.focus();
+      closeCommandsWindow();
+    });
+    body.appendChild(item);
+  });
 }
 
 /** Отправить запрос на голосовую команду. */
@@ -378,7 +527,7 @@ let _cmdPanelVisible = false;
 function toggleCommandPanel() {
   _cmdPanelVisible = !_cmdPanelVisible;
   const panel = document.getElementById('command-panel');
-  const btn   = document.getElementById('btn-cmd-toggle');
+  const btn   = document.getElementById('kbd-btn');
   panel.classList.toggle('visible', _cmdPanelVisible);
   btn.classList.toggle('active',    _cmdPanelVisible);
   if (_cmdPanelVisible) document.getElementById('cmd-input').focus();
@@ -387,6 +536,11 @@ function toggleCommandPanel() {
 // Enter в поле ввода → отправить
 document.getElementById('cmd-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') sendTextCommand();
+});
+
+// Escape → закрыть окно команд, если открыто
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && _cmdWindowVisible) closeCommandsWindow();
 });
 
 // ─── Mic button state ─────────────────────────────────────────
@@ -404,8 +558,6 @@ function setMicListening(on) {
 }
 
 // Сбросить подсветку микрофона при переходе в не-listen state
-const _origSetState = setState;
-// Перехватываем setState — сбрасываем mic при выходе из listen
 const _setStateOrig = setState;
 setState = function(state) {
   if (state !== 'listen') setMicListening(false);
@@ -479,8 +631,6 @@ function gideonSummon() {
   dissolve.phase='in'; dissolve.phaseTime=0;
   dissolve.orbitAlpha=0; dissolve.partAlpha=0; dissolve.wireAlpha=0;
   labelEl.style.opacity=''; subEl.style.opacity='';
-  document.querySelectorAll('#dev-controls button').forEach(b=>b.classList.remove('active'));
-  document.getElementById('btn-idle').classList.add('active');
 }
 canvas.addEventListener('click', e=>{
   if (!isSpeakCornerActive()) return;
@@ -593,7 +743,6 @@ function drawFocusPoint(rY,rX) {
   if (think.focusGlow<0.01) return;
   const {sx,sy}=project(think.targetNX,think.targetNY,think.targetNZ,rY,rX);
   const g=think.focusGlow;
-  // OPT: одиночный градиент вместо двух дуг
   const gr=ctx.createRadialGradient(sx,sy,0,sx,sy,R*0.14);
   gr.addColorStop(0,  `rgba(80,180,255,${g*0.90})`);
   gr.addColorStop(0.35,`rgba(60,140,240,${g*0.55})`);
@@ -627,19 +776,6 @@ function getSceneScale() {
     return think.cornerR/(Math.min(W,H)*0.212);
   if (isSpeakCornerActive()) return speakCorner.sceneScale;
   return 1.0;
-}
-
-// ═══════════════════════════════════════════════════════════════
-//  ANIMATION TEST
-// ═══════════════════════════════════════════════════════════════
-function runAnimationTest() {
-  document.querySelectorAll('#dev-controls button').forEach(b=>b.classList.remove('active'));
-  document.getElementById('btn-anim-test').classList.add('active');
-  _firstSpeak=false;
-  const prev=gState; gState='think';
-  subEl.textContent=STATE_LABELS.think;
-  enterThink();
-  setTimeout(()=>{ exitThink(); setTimeout(()=>setState(prev==='think'?'idle':prev),1800); },6500);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -686,8 +822,6 @@ function project(nx,ny,nz,rY,rX) {
 
 // ═══════════════════════════════════════════════════════════════
 //  WIREFRAME
-//  OPT: dots рисуются простым arc+fillStyle (убран createRadialGradient)
-//  OPT: wireStep пропускает каждые N параллелей в low LOD
 // ═══════════════════════════════════════════════════════════════
 const WIRE={N_MERIDIANS:18, N_PARALLELS:14, CURVE_PTS:120};
 
@@ -713,8 +847,6 @@ function drawParallel(latDeg,rY,rX,alpha) {
   pts.forEach(({sx,sy},i)=>{ if(i===0)ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy); });
   ctx.strokeStyle=`rgba(45,95,165,${alpha})`; ctx.lineWidth=1.1; ctx.stroke();
 
-  // OPT: wireframe dots — убираем createRadialGradient, используем простой fillStyle
-  // Визуально почти идентично при alpha < 0.8
   const cfg = LOD.cfg;
   for (let m=0;m<WIRE.N_MERIDIANS;m++) {
     const lon=(m/WIRE.N_MERIDIANS)*Math.PI*2-Math.PI;
@@ -723,14 +855,12 @@ function drawParallel(latDeg,rY,rX,alpha) {
     const dotR=R*0.021*p*(0.7+0.3*vis);
 
     if (cfg.dotGradient) {
-      // HIGH LOD: полный градиент (только для speak/listen)
       const gr=ctx.createRadialGradient(sx-dotR*0.3,sy-dotR*0.3,dotR*0.05,sx,sy,dotR);
       gr.addColorStop(0,  `rgba(220,240,255,${vis*alpha*1.2})`);
       gr.addColorStop(0.5,`rgba(100,170,230,${vis*alpha*0.9})`);
       gr.addColorStop(1,  `rgba(50,110,200,${vis*alpha*0.5})`);
       ctx.fillStyle=gr;
     } else {
-      // LOW/MID LOD: простой fillStyle — ~12x быстрее
       ctx.fillStyle=`rgba(100,160,220,${vis*alpha*0.85})`;
     }
     ctx.globalAlpha=1;
@@ -746,7 +876,6 @@ function drawWireframe(rY,rX) {
   for (let m=0;m<WIRE.N_MERIDIANS;m++)
     drawMeridian((m/WIRE.N_MERIDIANS)*360-180,rY,rX,a*0.78);
   for (let p=0;p<=WIRE.N_PARALLELS;p++) {
-    // OPT: wireStep=2 пропускает каждую вторую параллель в low LOD
     if (p % wireStep !== 0) continue;
     const latDeg=-90+180*(p/WIRE.N_PARALLELS);
     if (Math.abs(latDeg)>82) continue;
@@ -757,25 +886,9 @@ function drawWireframe(rY,rX) {
 
 // ═══════════════════════════════════════════════════════════════
 //  PARTICLE SYSTEM
-//
-//  OPT 1: buildParticles создаёт ВСЕ 1728 частиц один раз,
-//         но хранит в triples: [nx,ny,nz, phase,speed,size,bright, col,row]
-//         Никаких объектов — TypedArray для проекций
-//
-//  OPT 2: LOD.partStep управляет прореживанием:
-//         step=1: все частицы (high),  step=2: каждая 2-я (mid), step=3: каждая 3-я (low)
-//
-//  OPT 3: sort() заменён на ПРЕДВАРИТЕЛЬНО ОТСОРТИРОВАННЫЕ индексы,
-//         которые пересчитываются раз в SORT_INTERVAL кадров
-//
-//  OPT 4: projected — pre-allocated Float32Array (нет new Object каждый кадр)
-//
-//  OPT 5: createRadialGradient на частицах в LOW/MID LOD заменён на
-//         fillStyle с alpha-only — экономия ~3ms/frame
 // ═══════════════════════════════════════════════════════════════
 const PART_COLS=48, PART_ROWS=36, PART_TOTAL=PART_COLS*PART_ROWS; // 1728
 
-// Статические данные частиц: TypedArray
 const _pNX    = new Float32Array(PART_TOTAL);
 const _pNY    = new Float32Array(PART_TOTAL);
 const _pNZ    = new Float32Array(PART_TOTAL);
@@ -784,7 +897,6 @@ const _pSpeed = new Float32Array(PART_TOTAL);
 const _pSize  = new Float32Array(PART_TOTAL);
 const _pBright= new Float32Array(PART_TOTAL);
 
-// Pre-allocated проекции (пересчёт каждый кадр)
 const _prjSX  = new Float32Array(PART_TOTAL);
 const _prjSY  = new Float32Array(PART_TOTAL);
 const _prjZ2  = new Float32Array(PART_TOTAL);
@@ -792,10 +904,9 @@ const _prjDep = new Float32Array(PART_TOTAL);
 const _prjBri = new Float32Array(PART_TOTAL);
 const _prjDotR= new Float32Array(PART_TOTAL);
 
-// Индексы для сортировки (обновляются раз в N кадров)
 const _sortIdx = new Int32Array(PART_TOTAL);
 let _sortFrame = 0;
-const SORT_INTERVAL = 4; // пересортировать раз в 4 кадра
+const SORT_INTERVAL = 4;
 
 function buildParticles() {
   let i=0;
@@ -815,7 +926,6 @@ function buildParticles() {
   }
 }
 
-// OPT: Проекция всех частиц в pre-allocated arrays (без аллокаций)
 function projectParticles(cosRY,sinRY,cosRX,sinRX,t,dcx,dcy) {
   const freq=cur.siriFreq, amp=cur.siriAmp;
   for (let i=0;i<PART_TOTAL;i++) {
@@ -837,11 +947,8 @@ function projectParticles(cosRY,sinRY,cosRX,sinRX,t,dcx,dcy) {
   }
 }
 
-// OPT: Редкая пересортировка (раз в SORT_INTERVAL кадров)
 function maybeSortParticles(frame) {
   if (frame % SORT_INTERVAL !== 0) return;
-  // Сортируем _sortIdx по _prjZ2 (back-to-front)
-  // Используем insertion sort для небольших дельт между кадрами — O(n) для почти-отсортированных
   for (let i=1;i<PART_TOTAL;i++) {
     const idx=_sortIdx[i];
     const z=_prjZ2[idx];
@@ -879,7 +986,6 @@ function drawParticles(rY,rX,t,brightMult) {
     const finalB=Math.min(1,bright*rim*(0.6+0.4*cur.energy)*brightBoost)*pa;
 
     if (useGradient) {
-      // HIGH LOD: полный радиальный градиент
       const gr=ctx.createRadialGradient(sx-dotR*0.2,sy-dotR*0.2,0,sx,sy,dotR*2.5);
       gr.addColorStop(0,  `rgba(60,130,230,${finalB*0.55})`);
       gr.addColorStop(0.4,`rgba(40,100,200,${finalB*0.22})`);
@@ -887,12 +993,10 @@ function drawParticles(rY,rX,t,brightMult) {
       ctx.fillStyle=gr;
       ctx.beginPath(); ctx.arc(sx,sy,dotR*2.5,0,PI2); ctx.fill();
     }
-    // Все уровни: яркое ядро точки
     ctx.beginPath(); ctx.arc(sx,sy,dotR,0,PI2);
     ctx.fillStyle=`rgba(50,120,220,${finalB})`; ctx.fill();
   }
 
-  // Ободок (только mid/high)
   if (LOD.current !== 'low') {
     const rim1=ctx.createRadialGradient(dcx,dcy,R*0.82,dcx,dcy,R*1.00);
     rim1.addColorStop(0,  'rgba(80,140,220,0)');
@@ -914,7 +1018,6 @@ const ORBITS=[
   {tiltX:0.30,tiltZ:0.22,rotSpd:0.52,ph:0.70,rm:1.94,lw:1.0,a:0.30},
 ];
 
-// OPT: кешируем тригонометрию наклонов (не зависит от времени)
 const _orbitCache = ORBITS.map(o=>({
   cTx:Math.cos(o.tiltX), sTx:Math.sin(o.tiltX),
   cTz:Math.cos(o.tiltZ), sTz:Math.sin(o.tiltZ),
@@ -924,7 +1027,6 @@ function drawOrbit(o,cache,t,alphaMultiplier) {
   if (alphaMultiplier<0.005) return;
   const rotAngle=t*o.rotSpd*cur.spd+o.ph;
   const orbitR=R*o.rm, N=160;
-  // OPT: тригонометрия вращения — за пределами цикла
   const cR=Math.cos(rotAngle), sR=Math.sin(rotAngle);
   const {cTx,sTx,cTz,sTz}=cache;
   const {dcx,dcy}=getDC();
@@ -954,8 +1056,6 @@ function drawPulseRings(_t){ /* убраны */ }
 
 // ═══════════════════════════════════════════════════════════════
 //  RENDER LOOP
-//  OPT: frame budget — если предыдущий кадр занял >33ms, пропускаем
-//       тяжёлые эффекты (ободок, second orbit pass)
 // ═══════════════════════════════════════════════════════════════
 const startT=performance.now();
 let lastT=0, _frameCount=0, _lastFrameMs=0;
@@ -977,7 +1077,6 @@ function draw() {
   lastT=now;
   const t=now;
 
-  // Frame budget: если последний кадр > 33ms — помечаем как "slow"
   const frameSlow=_lastFrameMs>33;
   const frameStart=performance.now();
 
@@ -1001,7 +1100,7 @@ function draw() {
 
   const savedR=R;
   const scl=getSceneScale();
-  if (Math.abs(scl-1.0)>0.0005) R=savedR*scl; // eslint-disable-line
+  if (Math.abs(scl-1.0)>0.0005) R=savedR*scl;
 
   ctx.clearRect(0,0,W,H);
 
@@ -1014,7 +1113,6 @@ function draw() {
   const savedPartAlpha=cur.partAlpha;
   cur.partAlpha=cur.partAlpha*dPA;
 
-  // OPT: дальние орбиты пропускаем в slow-frame
   if (!frameSlow) drawOrbits(t,true,dOA);
 
   const {dcx,dcy}=getDC();
@@ -1036,7 +1134,7 @@ function draw() {
 
   cur.partAlpha=savedPartAlpha;
   cur.wireAlpha=savedWireAlpha;
-  R=savedR; // eslint-disable-line
+  R=savedR;
 
   _lastFrameMs=performance.now()-frameStart;
 }
