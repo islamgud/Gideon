@@ -58,6 +58,10 @@ async def _dispatch(data: dict, orchestrator) -> None:
         asyncio.create_task(orchestrator.process_voice_command())
         return
 
+    if msg_type == "list_commands":
+        asyncio.create_task(orchestrator.list_commands())
+        return
+
     # text_command или старый формат command
     command = data.get("command", "").strip()
     if command:
