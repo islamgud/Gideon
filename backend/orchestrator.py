@@ -8,7 +8,7 @@ import logging
 
 from .ai_brain import AIBrain
 from .voice_input import VoiceInput
-from .voice_output import VoiceOutput
+from .voice_output import VoiceOutput, COMMON_PHRASES
 from .tools import registry
 
 logger = logging.getLogger("gideon.orchestrator")
@@ -23,6 +23,16 @@ class Orchestrator:
         self._brain     = AIBrain()
         self._voice     = VoiceInput()
         self._tts       = VoiceOutput()
+
+        # Предзагрузить частые фразы в голосовой кэш (в фоне, не блокирует старт)
+        if self._tts.enabled:
+            import threading
+            threading.Thread(
+                target=self._tts.preload,
+                args=(COMMON_PHRASES,),
+                daemon=True,
+                name="gideon-voice-preload",
+            ).start()
 
         # Лог после инициализации AIBrain — теперь статус корректный
         mode = "Gemini API" if self._brain.is_ai_active else "KeywordFallback (нет ключа)"
