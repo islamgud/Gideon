@@ -68,8 +68,8 @@ class UnderwaterFX:
         self,
         pitch_semitones: float = -2.5,
         lowpass_hz: int = 2200,
-        reverb_ms: int = 220,
-        reverb_decay: float = 0.35,
+        reverb_ms: int = 150,
+        reverb_decay: float = 0.22,
         flanger_depth_ms: float = 3.0,
         flanger_rate_hz: float = 0.25,
         wet: float = 0.85,
@@ -90,7 +90,7 @@ class UnderwaterFX:
         seg = self._flanger(seg)             # 3. колыхание (течение)
         seg = self._reverb(seg)              # 4. пространство/глубина
         seg = seg.set_channels(2)            # стерео на выходе
-        return seg.normalize()
+        return seg
 
     # ── 1. Сдвиг тона (понижение) ─────────────────────────────────────────
     def _pitch_shift(self, seg: "AudioSegment") -> "AudioSegment":
@@ -167,11 +167,16 @@ class VoiceOutput:
         self,
         voice: str = "",
         rate: str = "",
+        volume_db: float | None = None,
         enabled: bool = True,
         fx: "UnderwaterFX | None" = None,
     ) -> None:
         self.voice = voice or os.environ.get("GIDEON_VOICE", "ru-RU-DmitryNeural")
-        self.rate = rate or os.environ.get("GIDEON_VOICE_RATE", "-8%")
+        self.rate = rate or os.environ.get("GIDEON_VOICE_RATE", "+12%")
+        # Громкость в дБ (отрицательное = тише). По умолч. -8 дБ.
+        if volume_db is None:
+            volume_db = float(os.environ.get("GIDEON_VOICE_VOLUME", "-8"))
+        self.volume_db = volume_db
         self.fx = fx or UnderwaterFX()
 
         env_off = os.environ.get("GIDEON_TTS", "").lower() == "off"
@@ -225,6 +230,9 @@ class VoiceOutput:
         """Наложить эффекты и воспроизвести (блокирующий вызов)."""
         seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
         seg = self.fx.apply(seg)
+        # Регулировка громкости (тише по умолчанию)
+        if self.volume_db:
+            seg = seg.apply_gain(self.volume_db)
         play(seg)
 
 
