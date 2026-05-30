@@ -112,6 +112,49 @@ class VoiceInput:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.recognize)
 
+    # ─── Wake-word («Гидеон») ──────────────────────────────────────────
+
+    def listen_for_wakeword(self, wake_words: list, phrase_limit: float = 3.0) -> bool:
+        """
+        Слушать короткий отрезок и проверить, прозвучало ли слово активации.
+        Возвращает True если услышал «гидеон» (или вариант), иначе False.
+
+        Используется в фоновом цикле — поэтому ошибки/тишина просто дают False,
+        без шумных логов на каждой итерации.
+        """
+        if not _SR_AVAILABLE or self._recognizer is None:
+            return False
+        try:
+            with sr.Microphone() as source:
+                self._recognizer.adjust_for_ambient_noise(source, duration=0.2)
+                audio = self._recognizer.listen(
+                    source, timeout=4.0, phrase_time_limit=phrase_limit
+                )
+        except (sr.WaitTimeoutError, OSError):
+            return False
+        except Exception:
+            return False
+
+        try:
+            text = self._recognizer.recognize_google(audio, language=self.language)
+        except (sr.UnknownValueError, sr.RequestError):
+            return False
+        except Exception:
+            return False
+
+        heard = text.lower().strip()
+        for w in wake_words:
+            if w in heard:
+                logger.info("Wake-word услышан: %r (в %r)", w, heard)
+                return True
+        return False
+
+    async def listen_for_wakeword_async(self, wake_words: list) -> bool:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self.listen_for_wakeword, wake_words
+        )
+
     # ─── Внутренние методы ───────────────────────────────────────────
 
     def _capture_audio(self) -> "VoiceResult":
