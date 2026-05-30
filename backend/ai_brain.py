@@ -34,6 +34,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from .memory import Memory
+
 logger = logging.getLogger("gideon.ai_brain")
 
 try:
@@ -91,7 +93,16 @@ SYSTEM_PROMPT = """Ты — ИИ-ядро голосового ассистен�
    {"action": "change_language", "value": "язык"}
    Значения value: en, ru, de, fr, zh, ja, ko, ar, tr — код языка ISO 639-1
 
-7. answer — ответить текстом (только если это не команда)
+7. remember — запомнить факт о пользователе (имя, предпочтения и т.д.)
+   {"action": "remember", "value": "ключ", "param": "значение"}
+
+8. recall — вспомнить ранее запомненный факт
+   {"action": "recall", "value": "ключ"}
+
+9. forget — забыть факт
+   {"action": "forget", "value": "ключ"}
+
+10. answer — ответить текстом (только если это не команда)
    {"action": "answer", "value": "текст ответа"}
 
 Примеры:
@@ -131,6 +142,15 @@ SYSTEM_PROMPT = """Ты — ИИ-ядро голосового ассистен�
 "смени язык на русский" → {"action": "change_language", "value": "ru"}
 "поменяй язык на немецкий" → {"action": "change_language", "value": "de"}
 "переключи раскладку на английский" → {"action": "change_language", "value": "en"}
+"запомни меня зовут Ислам" → {"action": "remember", "value": "имя", "param": "Ислам"}
+"запомни что мой любимый цвет синий" → {"action": "remember", "value": "любимый цвет", "param": "синий"}
+"как меня зовут" → {"action": "recall", "value": "имя"}
+"какой мой любимый цвет" → {"action": "recall", "value": "любимый цвет"}
+"забудь как меня зовут" → {"action": "forget", "value": "имя"}
+
+Если в разделе «Известные факты» есть нужная информация — используй
+action "answer" и ответь по памяти естественной фразой
+(например на «как меня зовут» при факте «имя: Ислам» → answer «Тебя зовут Ислам»).
 
 Отвечай ТОЛЬКО валидным JSON. Никакого текста вокруг."""
 
@@ -197,6 +217,9 @@ class CommandExecutor:
     Хардкодим только действия — не конкретные значения.
     """
 
+    def __init__(self, memory=None) -> None:
+        self.memory = memory
+
     async def execute(self, cmd: dict, registry_execute) -> dict:
         action = cmd.get("action", "")
         value  = cmd.get("value", "")
@@ -222,11 +245,49 @@ class CommandExecutor:
         elif action == "change_language":
             return await self._change_language(value, registry_execute)
 
+        elif action == "remember":
+            return self._remember(value, param)
+
+        elif action == "recall":
+            return self._recall(value)
+
+        elif action == "forget":
+            return self._forget(value)
+
         elif action == "answer":
             return {"response": value}
 
         else:
             return {"error": f"Неизвестное действие: {action}"}
+
+    # ─── Память ────────────────────────────────────────────────────────────
+
+    def _remember(self, key: str, value: str) -> dict:
+        if not self.memory:
+            return {"error": "Память недоступна"}
+        if not key or not value:
+            return {"error": "Не понял что запомнить"}
+        self.memory.remember(key, value)
+        return {"response": "Запомнил"}
+
+    def _recall(self, key: str) -> dict:
+        if not self.memory:
+            return {"error": "Память недоступна"}
+        val = self.memory.recall(key)
+        if val is None:
+            # пробуем поиск по подстроке
+            found = self.memory.search(key)
+            if found:
+                val = next(iter(found.values()))
+        if val is None:
+            return {"response": "Не помню такого"}
+        return {"response": val}
+
+    def _forget(self, key: str) -> dict:
+        if not self.memory:
+            return {"error": "Память недоступна"}
+        ok = self.memory.forget(key)
+        return {"response": "Забыл" if ok else "Такого и не помнил"}
 
     async def _change_language(self, lang: str, registry_execute) -> dict:
         """
@@ -529,11 +590,16 @@ class AIBrain:
     _DEFAULT_MODEL = "llama-3.3-70b-versatile"
 
     _client:   Any             = field(default=None, init=False, repr=False)
-    _executor: CommandExecutor = field(default_factory=CommandExecutor, init=False)
+    _executor: CommandExecutor = field(default=None, init=False, repr=False)
+    memory:    Any             = field(default=None, init=False, repr=False)
     _fallback: KeywordFallback = field(default_factory=KeywordFallback, init=False)
     _api_ok:   bool            = field(default=False, init=False)
 
     def __post_init__(self) -> None:
+        # Долговременная память + исполнитель с доступом к ней
+        self.memory = Memory()
+        self._executor = CommandExecutor(memory=self.memory)
+
         if not self.model:
             self.model = os.environ.get("GROQ_MODEL", self._DEFAULT_MODEL)
 
@@ -643,10 +709,18 @@ class AIBrain:
 
     def _groq_plan(self, user_text: str) -> dict:
         """Запрос к Groq → распарсенный JSON-план (без выполнения)."""
+        # Подмешиваем известные факты из памяти в системный промпт,
+        # чтобы Гидеон отвечал с их учётом.
+        system = SYSTEM_PROMPT
+        if self.memory:
+            facts = self.memory.context_string()
+            if facts:
+                system = SYSTEM_PROMPT + "\n\n" + facts
+
         response = self._client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system",  "content": SYSTEM_PROMPT},
+                {"role": "system",  "content": system},
                 {"role": "user",    "content": user_text},
             ],
             max_tokens=self.max_tokens,
