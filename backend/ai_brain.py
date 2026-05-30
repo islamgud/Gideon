@@ -342,7 +342,7 @@ Set-WinUserLanguageList $sorted -Force
         }
         exe = APP_MAP.get(app.lower(), app)
 
-        # Сначала пробуем через наш registry
+        # Сначала пробуем через наш registry (встроенные приложения)
         known = {"notepad": "notepad", "calculator": "calculator",
                  "calc": "calculator", "блокнот": "notepad"}
         if app.lower() in known or exe in known.values():
@@ -350,13 +350,36 @@ Set-WinUserLanguageList $sorted -Force
             if app_key:
                 return await registry_execute("open_app", {"app": app_key})
 
-        # Запускаем напрямую через subprocess
+        # Браузеры запускаем через webbrowser (надёжно, без PATH-проблем)
+        BROWSERS = {"chrome", "firefox", "msedge", "edge", "браузер", "browser"}
+        if app.lower() in BROWSERS or exe in BROWSERS:
+            import webbrowser
+            try:
+                webbrowser.open("https://www.google.com")
+                return {"response": f"Открываю браузер"}
+            except Exception:
+                pass
+
+        # Остальные приложения: пробуем несколько способов запуска по очереди.
         import subprocess
+        # 1) через shell "start" — резолвит App Paths из реестра (chrome, discord и т.д.)
+        # 2) напрямую по имени exe
+        attempts = [
+            f'start "" "{exe}"',   # оболочка ищет в App Paths
+            f'start "" {exe}',
+        ]
+        for cmd in attempts:
+            try:
+                subprocess.Popen(cmd, shell=True)
+                return {"response": f"Открываю {app}"}
+            except Exception:
+                continue
+        # 3) последняя попытка — напрямую
         try:
-            subprocess.Popen([exe], shell=True)
+            subprocess.Popen([exe], shell=False)
             return {"response": f"Открываю {app}"}
         except Exception as exc:
-            return {"error": f"Не удалось открыть {app}: {exc}"}
+            return {"error": f"Не удалось открыть {app}. Возможно, приложение не установлено."}
 
     async def _open_folder(self, folder: str, registry_execute) -> dict:
         import subprocess, os
