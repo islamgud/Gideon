@@ -58,38 +58,60 @@ class Orchestrator:
         await self.process_text_command(text)
 
     async def process_text_command(self, text: str) -> None:
-        """Принять текст → AIBrain → tool или диалог → ответ пользователю."""
+        """
+        Принять текст → составить план → ОЗВУЧИТЬ → выполнить → ответить.
+
+        Порядок: Гидеон сначала говорит что собирается сделать
+        («Открываю браузер»), и только после речи выполняет команду.
+        """
         logger.info("Текстовая команда: %r", text)
 
+        # 1. THINK — LLM решает что делать (но ещё не выполняет)
         await self._set_state("think")
+        cmd = await self._brain.plan(text)
 
-        result = await self._brain.process(text, registry.execute)
-
+        # 2. SPEAK — озвучить намерение ДО выполнения
         await self._set_state("speak")
-        payload = {"state": "speak"}
-        if "response" in result:
-            payload["response"] = result["response"]
-            payload["status"]   = "success"
-        else:
-            payload["response"] = result.get("error", "Ошибка")
-            payload["status"]   = "error"
-        await self._send(payload)
+        action = cmd.get("action", "")
 
-        # Озвучить ответ «подводным» голосом.
-        # speak_async БЛОКИРУЕТ до конца воспроизведения — поэтому сфера
-        # остаётся в состоянии "speak" ровно столько, сколько Гидеон говорит.
-        spoken = payload.get("response", "")
+        # Фраза-намерение: для команд — «Открываю браузер», для ответов — сам ответ
+        if action == "answer":
+            phrase = cmd.get("value", "")
+        elif action == "error":
+            phrase = cmd.get("value", "Команда не распознана")
+        else:
+            phrase = self._brain.speech_for(cmd)
+
+        # Отправить текст во frontend (подпись под сферой)
+        await self._send({
+            "state":    "speak",
+            "status":   "error" if action == "error" else "success",
+            "response": phrase,
+        })
+
+        # Озвучить намерение и ДОЖДАТЬСЯ конца речи
         spoke_aloud = False
-        if spoken and self._tts.enabled:
-            await self._tts.speak_async(spoken)
+        if phrase and self._tts.enabled:
+            await self._tts.speak_async(phrase)
             spoke_aloud = True
 
-        # Если голос не проигрывался (отключён/нет интернета) — держим
-        # состояние "speak" небольшую паузу, чтобы сфера не мигала.
+        # 3. ВЫПОЛНИТЬ команду (после того как договорил)
+        if action not in ("answer", "error"):
+            result = await self._brain.execute_plan(cmd, registry.execute)
+            # Если при выполнении возникла ошибка — сообщить
+            if "error" in result:
+                await self._send({
+                    "state": "speak", "status": "error",
+                    "response": result["error"],
+                })
+                if self._tts.enabled:
+                    await self._tts.speak_async(result["error"])
+
+        # 4. Пауза и возврат в покой
         if not spoke_aloud:
-            await asyncio.sleep(1.8)
+            await asyncio.sleep(1.5)
         else:
-            await asyncio.sleep(0.3)  # короткий «выдох» после речи
+            await asyncio.sleep(0.3)
 
         await self._set_state("idle")
 
