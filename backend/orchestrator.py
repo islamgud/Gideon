@@ -8,6 +8,7 @@ import logging
 
 from .ai_brain import AIBrain
 from .voice_input import VoiceInput
+from .voice_output import VoiceOutput
 from .tools import registry
 
 logger = logging.getLogger("gideon.orchestrator")
@@ -21,6 +22,7 @@ class Orchestrator:
         self._broadcast = None
         self._brain     = AIBrain()
         self._voice     = VoiceInput()
+        self._tts       = VoiceOutput()
 
         # Лог после инициализации AIBrain — теперь статус корректный
         mode = "Gemini API" if self._brain.is_ai_active else "KeywordFallback (нет ключа)"
@@ -73,7 +75,22 @@ class Orchestrator:
             payload["status"]   = "error"
         await self._send(payload)
 
-        await asyncio.sleep(2.0)
+        # Озвучить ответ «подводным» голосом.
+        # speak_async БЛОКИРУЕТ до конца воспроизведения — поэтому сфера
+        # остаётся в состоянии "speak" ровно столько, сколько Гидеон говорит.
+        spoken = payload.get("response", "")
+        spoke_aloud = False
+        if spoken and self._tts.enabled:
+            await self._tts.speak_async(spoken)
+            spoke_aloud = True
+
+        # Если голос не проигрывался (отключён/нет интернета) — держим
+        # состояние "speak" небольшую паузу, чтобы сфера не мигала.
+        if not spoke_aloud:
+            await asyncio.sleep(1.8)
+        else:
+            await asyncio.sleep(0.3)  # короткий «выдох» после речи
+
         await self._set_state("idle")
 
     async def process_voice_command(self) -> None:
