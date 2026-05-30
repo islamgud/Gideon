@@ -65,55 +65,55 @@ class Orchestrator:
         («Открываю браузер»), и только после речи выполняет команду.
         """
         logger.info("Текстовая команда: %r", text)
-
-        # 1. THINK — LLM решает что делать (но ещё не выполняет)
-        await self._set_state("think")
-        cmd = await self._brain.plan(text)
-
-        # 2. SPEAK — озвучить намерение ДО выполнения
-        await self._set_state("speak")
-        action = cmd.get("action", "")
-
-        # Фраза-намерение: для команд — «Открываю браузер», для ответов — сам ответ
-        if action == "answer":
-            phrase = cmd.get("value", "")
-        elif action == "error":
-            phrase = cmd.get("value", "Команда не распознана")
-        else:
-            phrase = self._brain.speech_for(cmd)
-
-        # Отправить текст во frontend (подпись под сферой)
-        await self._send({
-            "state":    "speak",
-            "status":   "error" if action == "error" else "success",
-            "response": phrase,
-        })
-
-        # Озвучить намерение и ДОЖДАТЬСЯ конца речи
         spoke_aloud = False
-        if phrase and self._tts.enabled:
-            await self._tts.speak_async(phrase)
-            spoke_aloud = True
+        try:
+            # 1. THINK — LLM решает что делать (но ещё не выполняет)
+            await self._set_state("think")
+            cmd = await self._brain.plan(text)
 
-        # 3. ВЫПОЛНИТЬ команду (после того как договорил)
-        if action not in ("answer", "error"):
-            result = await self._brain.execute_plan(cmd, registry.execute)
-            # Если при выполнении возникла ошибка — сообщить
-            if "error" in result:
-                await self._send({
-                    "state": "speak", "status": "error",
-                    "response": result["error"],
-                })
-                if self._tts.enabled:
-                    await self._tts.speak_async(result["error"])
+            # 2. SPEAK — озвучить намерение ДО выполнения
+            await self._set_state("speak")
+            action = cmd.get("action", "")
 
-        # 4. Пауза и возврат в покой
-        if not spoke_aloud:
-            await asyncio.sleep(1.5)
-        else:
-            await asyncio.sleep(0.3)
+            if action == "answer":
+                phrase = cmd.get("value", "")
+            elif action == "error":
+                phrase = cmd.get("value", "Команда не распознана")
+            else:
+                phrase = self._brain.speech_for(cmd)
 
-        await self._set_state("idle")
+            # Отправить текст во frontend (подпись под сферой)
+            await self._send({
+                "state":    "speak",
+                "status":   "error" if action == "error" else "success",
+                "response": phrase,
+            })
+
+            # Озвучить намерение и ДОЖДАТЬСЯ конца речи
+            if phrase and self._tts.enabled:
+                await self._tts.speak_async(phrase)
+                spoke_aloud = True
+
+            # 3. ВЫПОЛНИТЬ команду (после того как договорил)
+            if action not in ("answer", "error"):
+                result = await self._brain.execute_plan(cmd, registry.execute)
+                if "error" in result:
+                    await self._send({
+                        "state": "speak", "status": "error",
+                        "response": result["error"],
+                    })
+                    if self._tts.enabled:
+                        await self._tts.speak_async(result["error"])
+
+        except Exception:
+            logger.exception("Ошибка при обработке команды")
+        finally:
+            # ГАРАНТИРОВАННЫЙ возврат в покой — что бы ни случилось выше
+            if not spoke_aloud:
+                await asyncio.sleep(1.2)
+            else:
+                await asyncio.sleep(0.3)
+            await self._set_state("idle")
 
     async def process_voice_command(self) -> None:
         """Голосовой ввод → AIBrain → ответ."""
