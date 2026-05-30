@@ -50,6 +50,31 @@ except ImportError:
 #  ПОДВОДНЫЕ / ПРОСТРАНСТВЕННЫЕ ЭФФЕКТЫ
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Частые фразы-намерения — предзагружаются в кэш при старте для мгновенной речи.
+COMMON_PHRASES = [
+    "Открываю браузер",
+    "Открываю приложение",
+    "Открываю сайт",
+    "Открываю папку загрузки",
+    "Открываю документы",
+    "Открываю рабочий стол",
+    "Выключаю компьютер",
+    "Перезагружаю компьютер",
+    "Блокирую экран",
+    "Делаю скриншот",
+    "Прибавляю громкость",
+    "Убавляю громкость",
+    "Выключаю звук",
+    "Включаю звук",
+    "Меняю громкость",
+    "Меняю язык",
+    "Выполняю",
+    "Секунду",
+    "Привет! Чем могу помочь?",
+    "Команда не распознана. Попробуй иначе.",
+]
+
+
 class UnderwaterFX:
     """
     Набор аудио-эффектов, превращающих обычный голос в «голос из глубины».
@@ -179,6 +204,18 @@ class VoiceOutput:
         self.volume_db = volume_db
         self.fx = fx or UnderwaterFX()
 
+        # Кэш готовых (уже обработанных) аудио-сегментов по тексту фразы.
+        # В памяти — для мгновенного повтора в рамках сессии.
+        self._mem_cache: dict = {}
+        # На диске — чтобы частые фразы не пересинтезировались после перезапуска.
+        self._cache_dir = os.path.join(
+            tempfile.gettempdir(), "gideon_voice_cache"
+        )
+        try:
+            os.makedirs(self._cache_dir, exist_ok=True)
+        except Exception:
+            self._cache_dir = ""
+
         env_off = os.environ.get("GIDEON_TTS", "").lower() == "off"
         self.enabled = enabled and not env_off and _EDGE_AVAILABLE and _AUDIO_AVAILABLE
 
@@ -207,14 +244,46 @@ class VoiceOutput:
             logger.warning("Ошибка озвучивания: %s", exc)
 
     async def _do_speak(self, text: str) -> None:
-        # 1. Синтез через edge-tts (с таймаутом на сеть)
+        loop = asyncio.get_event_loop()
+        key = self._cache_key(text)
+
+        # ── Кэш в памяти — мгновенное воспроизведение ──────────────────
+        seg = self._mem_cache.get(key)
+        if seg is not None:
+            logger.info("Голос из кэша (память): %r", text)
+            await loop.run_in_executor(None, self._play_segment, seg)
+            return
+
+        # ── Кэш на диске — без обращения к edge-tts ────────────────────
+        disk_path = self._disk_path(key)
+        if disk_path and os.path.exists(disk_path):
+            logger.info("Голос из кэша (диск): %r", text)
+            seg = await loop.run_in_executor(
+                None, lambda: AudioSegment.from_file(disk_path, format="wav")
+            )
+            self._mem_cache[key] = seg
+            await loop.run_in_executor(None, self._play_segment, seg)
+            return
+
+        # ── Нет в кэше: синтез + обработка + сохранение ─────────────────
         mp3_bytes = await asyncio.wait_for(self._synthesize(text), timeout=10.0)
         if not mp3_bytes:
             logger.warning("edge-tts вернул пустое аудио")
             return
-        # 2. Обработка эффектами + воспроизведение в thread (блокирующее)
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._process_and_play, mp3_bytes)
+
+        # Обработать эффектами (в thread) и закэшировать
+        seg = await loop.run_in_executor(None, self._render, mp3_bytes)
+        self._mem_cache[key] = seg
+        if disk_path:
+            try:
+                await loop.run_in_executor(
+                    None, lambda: seg.export(disk_path, format="wav")
+                )
+            except Exception as exc:
+                logger.debug("Не удалось сохранить кэш на диск: %s", exc)
+
+        # Воспроизвести
+        await loop.run_in_executor(None, self._play_segment, seg)
 
     def speak(self, text: str) -> None:
         """Синхронная версия — для запуска вне asyncio."""
@@ -237,14 +306,63 @@ class VoiceOutput:
                 buf.write(chunk["data"])
         return buf.getvalue()
 
-    def _process_and_play(self, mp3_bytes: bytes) -> None:
-        """Наложить эффекты и воспроизвести (блокирующий вызов)."""
+    def _render(self, mp3_bytes: bytes) -> "AudioSegment":
+        """Из mp3 → наложить эффекты + громкость → готовый сегмент."""
         seg = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
         seg = self.fx.apply(seg)
-        # Регулировка громкости (тише по умолчанию)
         if self.volume_db:
             seg = seg.apply_gain(self.volume_db)
+        return seg
+
+    def _play_segment(self, seg: "AudioSegment") -> None:
+        """Воспроизвести готовый сегмент (блокирующий вызов)."""
         play(seg)
+
+    def _process_and_play(self, mp3_bytes: bytes) -> None:
+        """Совместимость: обработать и сразу воспроизвести."""
+        self._play_segment(self._render(mp3_bytes))
+
+    # ─── Кэш ───────────────────────────────────────────────────────────────
+
+    def _cache_key(self, text: str) -> str:
+        """Ключ кэша учитывает текст + параметры голоса (чтобы не путать)."""
+        import hashlib
+        raw = f"{text}|{self.voice}|{self.rate}|{self.volume_db}"
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+    def _disk_path(self, key: str) -> str:
+        if not self._cache_dir:
+            return ""
+        return os.path.join(self._cache_dir, key + ".wav")
+
+    def preload(self, phrases: list) -> None:
+        """
+        Предзагрузить (синтезировать и закэшировать) список частых фраз.
+        Вызывается в фоне при старте, чтобы первые команды звучали мгновенно.
+        """
+        if not self.enabled:
+            return
+        for text in phrases:
+            if not text or not text.strip():
+                continue
+            key = self._cache_key(text)
+            if key in self._mem_cache:
+                continue
+            disk_path = self._disk_path(key)
+            try:
+                if disk_path and os.path.exists(disk_path):
+                    self._mem_cache[key] = AudioSegment.from_file(disk_path, format="wav")
+                    continue
+                mp3 = asyncio.run(self._synthesize(text))
+                if not mp3:
+                    continue
+                seg = self._render(mp3)
+                self._mem_cache[key] = seg
+                if disk_path:
+                    seg.export(disk_path, format="wav")
+            except Exception as exc:
+                logger.debug("preload %r не удался: %s", text, exc)
+        logger.info("Голосовой кэш: предзагружено %d фраз", len(self._mem_cache))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
