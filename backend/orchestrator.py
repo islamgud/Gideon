@@ -24,6 +24,10 @@ class Orchestrator:
         self._voice     = VoiceInput()
         self._tts       = VoiceOutput()
 
+        self._busy = False            # занят ли обработкой команды
+        self._wake_enabled = True     # активен ли фоновый режим «Гидеон»
+        self._wake_words = ["гидеон", "гидион", "гедеон", "gideon"]
+
         # Предзагрузить частые фразы в голосовой кэш (в фоне, не блокирует старт)
         if self._tts.enabled:
             import threading
@@ -34,8 +38,7 @@ class Orchestrator:
                 name="gideon-voice-preload",
             ).start()
 
-        # Лог после инициализации AIBrain — теперь статус корректный
-        mode = "Gemini API" if self._brain.is_ai_active else "KeywordFallback (нет ключа)"
+        mode = "Groq API" if self._brain.is_ai_active else "KeywordFallback (нет ключа)"
         logger.info("Orchestrator запущен. Режим: %s", mode)
 
     def set_broadcast(self, fn) -> None:
@@ -126,26 +129,72 @@ class Orchestrator:
             await self._set_state("idle")
 
     async def process_voice_command(self) -> None:
-        """Голосовой ввод → AIBrain → ответ."""
-        logger.info("Голосовая команда")
+        """Голосовой ввод по КНОПКЕ → AIBrain → ответ."""
+        logger.info("Голосовая команда (кнопка)")
+        await self._listen_and_process()
 
-        await self._set_state("listen")
-        await self._send({"state": "listen", "status": "listening"})
+    async def _listen_and_process(self) -> None:
+        """Послушать команду с микрофона и обработать её."""
+        if self._busy:
+            return
+        self._busy = True
+        try:
+            await self._set_state("listen")
+            await self._send({"state": "listen", "status": "listening"})
 
-        voice_result = await self._voice.recognize_async()
+            voice_result = await self._voice.recognize_async()
 
-        if not voice_result.success:
-            await self._set_state("speak")
-            await self._send({
-                "state":    "speak",
-                "status":   "error",
-                "response": voice_result.error or "Не удалось распознать речь",
-            })
-            await asyncio.sleep(2.0)
-            await self._set_state("idle")
+            if not voice_result.success:
+                await self._set_state("speak")
+                await self._send({
+                    "state":    "speak",
+                    "status":   "error",
+                    "response": voice_result.error or "Не удалось распознать речь",
+                })
+                await asyncio.sleep(2.0)
+                await self._set_state("idle")
+                return
+
+            recognized = voice_result.text
+            logger.info("Распознано: %r", recognized)
+            await self._send({"state": "think", "recognized": recognized})
+            await self.process_text_command(recognized)
+        finally:
+            self._busy = False
+
+    # ─── Wake-word: фоновое прослушивание «Гидеон» ──────────────────────
+
+    async def wake_word_loop(self) -> None:
+        """
+        Бесконечный фоновый цикл: слушает слово «Гидеон».
+        Услышал → откликается голосом → слушает и выполняет команду.
+        Запускается автоматически при старте (если включён голос).
+        """
+        if not getattr(self._voice, "_recognizer", None):
+            logger.info("Wake-word отключён: микрофон/SR недоступен")
             return
 
-        recognized = voice_result.text
-        logger.info("Распознано: %r", recognized)
-        await self._send({"state": "think", "recognized": recognized})
-        await self.process_text_command(recognized)
+        logger.info("Wake-word активен: скажите «Гидеон»")
+        while True:
+            try:
+                if self._busy or not self._wake_enabled:
+                    await asyncio.sleep(0.5)
+                    continue
+
+                heard = await self._voice.listen_for_wakeword_async(self._wake_words)
+                if not heard:
+                    continue
+
+                # Откликнуться
+                await self._set_state("speak")
+                await self._send({"state": "speak", "status": "success",
+                                  "response": "Слушаю"})
+                if self._tts.enabled:
+                    await self._tts.speak_async("Слушаю")
+
+                # Послушать и выполнить команду
+                await self._listen_and_process()
+
+            except Exception:
+                logger.exception("Ошибка в цикле wake-word")
+                await asyncio.sleep(1.0)
