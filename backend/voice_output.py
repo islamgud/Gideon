@@ -193,17 +193,28 @@ class VoiceOutput:
     # ─── Публичный API ────────────────────────────────────────────────────
 
     async def speak_async(self, text: str) -> None:
-        """Асинхронно озвучить текст (синтез + эффекты + воспроизведение)."""
+        """
+        Асинхронно озвучить текст (синтез + эффекты + воспроизведение).
+        Защищено таймаутом — если сеть/звук зависли, Гидеон не залипает.
+        """
         if not self.enabled or not text.strip():
             return
         try:
-            # 1. Синтез через edge-tts (async)
-            mp3_bytes = await self._synthesize(text)
-            # 2. Обработка эффектами + воспроизведение в thread (блокирующее)
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._process_and_play, mp3_bytes)
+            await asyncio.wait_for(self._do_speak(text), timeout=20.0)
+        except asyncio.TimeoutError:
+            logger.warning("Озвучивание прервано по таймауту (сеть/звук)")
         except Exception as exc:
             logger.warning("Ошибка озвучивания: %s", exc)
+
+    async def _do_speak(self, text: str) -> None:
+        # 1. Синтез через edge-tts (с таймаутом на сеть)
+        mp3_bytes = await asyncio.wait_for(self._synthesize(text), timeout=10.0)
+        if not mp3_bytes:
+            logger.warning("edge-tts вернул пустое аудио")
+            return
+        # 2. Обработка эффектами + воспроизведение в thread (блокирующее)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._process_and_play, mp3_bytes)
 
     def speak(self, text: str) -> None:
         """Синхронная версия — для запуска вне asyncio."""
