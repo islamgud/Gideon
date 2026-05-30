@@ -23,11 +23,17 @@ class Orchestrator:
         self._voice     = VoiceInput()
 
         # Лог после инициализации AIBrain — теперь статус корректный
-        mode = "Groq API" if self._brain.is_ai_active else "KeywordFallback (нет ключа)"
+        mode = "Gemini API" if self._brain.is_ai_active else "KeywordFallback (нет ключа)"
         logger.info("Orchestrator запущен. Режим: %s", mode)
 
     def set_broadcast(self, fn) -> None:
         self._broadcast = fn
+
+    async def list_commands(self) -> None:
+        """Отправить frontend каталог доступных команд."""
+        commands = self._brain.get_commands()
+        logger.info("Запрошен список команд: %d шт.", len(commands))
+        await self._send({"commands": commands})
 
     # ─── State ───────────────────────────────────────────────────────────
 
