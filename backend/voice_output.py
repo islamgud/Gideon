@@ -300,12 +300,54 @@ class VoiceOutput:
 
     async def _synthesize(self, text: str) -> bytes:
         """Синтезировать речь через edge-tts → mp3 bytes."""
+        text = self._fix_pronunciation(text)
         communicate = edge_tts.Communicate(text, self.voice, rate=self.rate)
         buf = io.BytesIO()
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 buf.write(chunk["data"])
         return buf.getvalue()
+
+    # Комбинируемый знак ударения (U+0301) — ставится ПОСЛЕ ударной гласной.
+    _ACCENT = "\u0301"
+
+    def _fix_pronunciation(self, text: str) -> str:
+        """
+        Поправить произношение имени «Гидеон»: ударение на «О» + протяжность.
+        Работает для любого регистра и падежей (Гидеон, Гидеона, Гидеону...).
+
+        Приём: удлиняем ударную «о» (дублируем) и ставим знак ударения U+0301.
+        Azure-голоса edge-tts уважают этот символ → «ГидеО~Он».
+        """
+        import re
+        acc = self._ACCENT
+
+        def repl(m: "re.Match") -> str:
+            word = m.group(0)
+            # Цель: протяжное «Гид-ЭЭЭ-ОООО(ударная)-ННН».
+            # Ищем "еон" внутри слова (Гид[еон]...)
+            low = word.lower()
+            idx = low.find("еон")
+            if idx == -1:
+                return word
+            before = word[:idx]               # "Гид"
+            e_char = word[idx]                # "е"
+            o_char = word[idx + 1]            # "о"
+            n_char = word[idx + 2]            # "н"
+            after  = word[idx + 3:]           # окончание ("", "а", "у"...)
+
+            # е → э, твёрдая и протяжная (×3)
+            hard_e = ("Э" if e_char.isupper() else "э") * 3
+            # о — протяжная (×4) с ударением на первой
+            o_low = o_char.lower()
+            stressed_o = o_char + acc + o_low * 3
+            # н — слегка удлинённая (×2)
+            long_n = n_char * 2
+
+            return before + hard_e + stressed_o + long_n + after
+
+        # Все словоформы, начинающиеся на «гидеон»
+        return re.sub(r"[Гг]идеон\w*", repl, text)
 
     def _render(self, mp3_bytes: bytes) -> "AudioSegment":
         """Из mp3 → наложить эффекты + громкость → готовый сегмент."""
@@ -328,7 +370,9 @@ class VoiceOutput:
     def _cache_key(self, text: str) -> str:
         """Ключ кэша учитывает текст + параметры голоса (чтобы не путать)."""
         import hashlib
-        raw = f"{text}|{self.voice}|{self.rate}|{self.volume_db}"
+        # v2 — версия логики произношения (ударение в «Гидеоо́н»).
+        # При смене произношения меняй версию, чтобы кэш пересоздался.
+        raw = f"v4|{text}|{self.voice}|{self.rate}|{self.volume_db}"
         return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
     def _disk_path(self, key: str) -> str:
