@@ -350,13 +350,27 @@ Set-WinUserLanguageList $sorted -Force
             if app_key:
                 return await registry_execute("open_app", {"app": app_key})
 
-        # Браузеры запускаем через webbrowser (надёжно, без PATH-проблем)
-        BROWSERS = {"chrome", "firefox", "msedge", "edge", "браузер", "browser"}
-        if app.lower() in BROWSERS or exe in BROWSERS:
-            import webbrowser
+        # Браузеры: открываем с домашней страницей (не форсим URL).
+        # "start chrome" без аргументов → откроется домашняя страница браузера.
+        import subprocess
+        BROWSER_EXE = {
+            "chrome": "chrome", "хром": "chrome",
+            "firefox": "firefox", "файрфокс": "firefox",
+            "edge": "msedge", "msedge": "msedge",
+            "браузер": "", "browser": "",  # пустой → браузер по умолчанию
+        }
+        if app.lower() in BROWSER_EXE or exe in BROWSER_EXE.values():
+            target = BROWSER_EXE.get(app.lower(), exe)
             try:
-                webbrowser.open("https://www.google.com")
-                return {"response": f"Открываю браузер"}
+                if target:
+                    # Конкретный браузер по имени (chrome/firefox/msedge).
+                    # start резолвит путь из App Paths; без URL → домашняя страница.
+                    subprocess.Popen(f'start "" {target}', shell=True)
+                else:
+                    # «браузер» без уточнения → браузер по умолчанию.
+                    # Запуск пустого start открывает ассоциированное приложение.
+                    subprocess.Popen('start ""', shell=True)
+                return {"response": "Открываю браузер"}
             except Exception:
                 pass
 
@@ -543,17 +557,73 @@ class AIBrain:
             logger.error("Ошибка инициализации Groq: %s", exc)
 
     async def process(self, user_text: str, registry_execute) -> dict:
-        if not self._api_ok or self._client is None:
-            return await self._fallback_process(user_text, registry_execute)
+        """Старый путь (сразу выполнить). Оставлен для совместимости."""
+        cmd = await self.plan(user_text)
+        return await self.execute_plan(cmd, registry_execute)
 
+    async def plan(self, user_text: str) -> dict:
+        """
+        Фаза 1: получить от LLM команду (JSON), НЕ выполняя её.
+        Возвращает dict вида {"action": ..., "value": ..., "param": ...}
+        либо {"action": "error", "value": "..."} при сбое.
+        """
+        if not self._api_ok or self._client is None:
+            return self._fallback_plan(user_text)
         try:
             return await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self._groq_call(user_text, registry_execute),
+                None, lambda: self._groq_plan(user_text)
             )
         except Exception:
-            logger.exception("Ошибка Groq, переключаюсь на fallback")
-            return await self._fallback_process(user_text, registry_execute)
+            logger.exception("Ошибка Groq при планировании, fallback")
+            return self._fallback_plan(user_text)
+
+    async def execute_plan(self, cmd: dict, registry_execute) -> dict:
+        """Фаза 2: выполнить уже полученную команду."""
+        if cmd.get("action") == "error":
+            return {"error": cmd.get("value", "Команда не распознана")}
+        return await self._executor.execute(cmd, registry_execute)
+
+    @staticmethod
+    def speech_for(cmd: dict) -> str:
+        """
+        Короткая фраза, которую Гидеон произносит ДО выполнения команды.
+        Для action=answer фраза не нужна (там сам ответ и есть речь).
+        """
+        action = cmd.get("action", "")
+        value  = (cmd.get("value", "") or "").lower()
+
+        if action == "answer":
+            return ""  # ответ озвучивается как есть, отдельная фраза не нужна
+
+        if action == "open_url":
+            return "Открываю сайт"
+        if action == "open_folder":
+            names = {"downloads": "папку загрузки", "загрузки": "папку загрузки",
+                     "documents": "документы", "документы": "документы",
+                     "desktop": "рабочий стол", "рабочий стол": "рабочий стол",
+                     "pictures": "картинки", "music": "музыку", "videos": "видео"}
+            return f"Открываю {names.get(value, 'папку')}"
+        if action == "open_app":
+            browsers = {"chrome", "firefox", "msedge", "edge", "браузер", "browser"}
+            if value in browsers:
+                return "Открываю браузер"
+            return f"Открываю {value}" if value else "Открываю приложение"
+        if action == "change_language":
+            return "Меняю язык"
+        if action == "get_info":
+            return "Секунду"
+        if action == "system_command":
+            phrases = {
+                "shutdown": "Выключаю компьютер", "restart": "Перезагружаю компьютер",
+                "lock": "Блокирую экран", "screenshot": "Делаю скриншот",
+                "volume_up": "Прибавляю громкость", "volume_down": "Убавляю громкость",
+                "volume_mute": "Выключаю звук", "volume_unmute": "Включаю звук",
+                "volume_set": "Меняю громкость",
+                "volume_delta_up": "Прибавляю громкость",
+                "volume_delta_down": "Убавляю громкость",
+            }
+            return phrases.get(value, "Выполняю")
+        return "Выполняю"
 
     def clear_history(self) -> None:
         pass
@@ -571,7 +641,8 @@ class AIBrain:
 
     # ─── Groq вызов ───────────────────────────────────────────────────────
 
-    def _groq_call(self, user_text: str, registry_execute) -> dict:
+    def _groq_plan(self, user_text: str) -> dict:
+        """Запрос к Groq → распарсенный JSON-план (без выполнения)."""
         response = self._client.chat.completions.create(
             model=self.model,
             messages=[
@@ -579,25 +650,16 @@ class AIBrain:
                 {"role": "user",    "content": user_text},
             ],
             max_tokens=self.max_tokens,
-            temperature=0.1,   # минимальная температура — нам нужен точный JSON
+            temperature=0.1,
         )
-
         raw = response.choices[0].message.content or ""
         logger.info("Groq ответил: %s", raw.strip())
 
         cmd = self._parse_json(raw)
         if cmd is None:
             logger.warning("Не удалось распарсить JSON: %s", raw)
-            return {"error": "Не понял команду"}
-
-        # Выполняем в новом event loop (мы в thread executor)
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(
-                self._executor.execute(cmd, registry_execute)
-            )
-        finally:
-            loop.close()
+            return {"action": "error", "value": "Не понял команду"}
+        return cmd
 
     @staticmethod
     def _parse_json(text: str) -> dict | None:
@@ -617,10 +679,30 @@ class AIBrain:
                     pass
         return None
 
-    async def _fallback_process(self, text: str, registry_execute) -> dict:
+    def _fallback_plan(self, text: str) -> dict:
+        """Keyword-fallback → JSON-план в том же формате что у LLM."""
         match = self._fallback.match(text)
-        if match:
-            tool_name, args = match
-            logger.info("[Fallback] %s(%s)", tool_name, args)
-            return await registry_execute(tool_name, args)
-        return {"error": "Команда не распознана. Попробуй иначе."}
+        if not match:
+            return {"action": "error", "value": "Команда не распознана. Попробуй иначе."}
+        tool_name, args = match
+        logger.info("[Fallback] %s(%s)", tool_name, args)
+        # Конвертируем (tool, args) → формат плана executor'а
+        if tool_name == "open_app":
+            return {"action": "open_app", "value": args.get("app", "")}
+        if tool_name == "open_url":
+            return {"action": "open_url", "value": args.get("url", "")}
+        if tool_name == "open_system_app":
+            return {"action": "system_command", "value": args.get("app", "")}
+        if tool_name == "take_screenshot":
+            return {"action": "system_command", "value": "screenshot"}
+        if tool_name == "shutdown_pc":
+            return {"action": "system_command", "value": "shutdown"}
+        if tool_name == "restart_pc":
+            return {"action": "system_command", "value": "restart"}
+        if tool_name == "lock_pc":
+            return {"action": "system_command", "value": "lock"}
+        if tool_name == "set_volume":
+            return {"action": "system_command", "value": "volume_" + args.get("action", "up")}
+        if tool_name == "get_system_info":
+            return {"action": "get_info", "value": args.get("info_type", "all")}
+        return {"action": "error", "value": "Команда не распознана"}
