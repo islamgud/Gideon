@@ -97,6 +97,9 @@ async def start(orchestrator) -> None:
     """Запустить WebSocket сервер."""
     orchestrator.set_broadcast(_broadcast)
 
+    # Фоновый цикл прослушивания слова «Гидеон» (хендсфри)
+    asyncio.create_task(orchestrator.wake_word_loop())
+
     async with websockets.serve(
         lambda ws: _handler(ws, orchestrator),
         HOST,
